@@ -234,7 +234,6 @@ def _build_estimator(model_name: str, args: argparse.Namespace, task: TaskSpec):
         dev = env_dev or _resolve_tabicl_device(args.tabicl_device)
         kw: dict = {
             "n_estimators": 16,
-            "use_hierarchical": True,
             "checkpoint_version": "tabicl-classifier-v1.1-0506.ckpt",
             "n_jobs": 1,
             "use_amp": args.tabicl_use_amp,

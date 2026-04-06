@@ -16,7 +16,6 @@ def build_tabicl(
 ) -> TabICLClassifier:
     kwargs: dict[str, object] = {
         "n_estimators": 16,
-        "use_hierarchical": True,
         "checkpoint_version": "tabicl-classifier-v1.1-0506.ckpt",
         "n_jobs": n_jobs,
         "use_amp": use_amp,
