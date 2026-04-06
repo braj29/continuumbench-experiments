@@ -1,0 +1,39 @@
+[project]
+name = "continuumbench-experiments"
+version = "0.1.0"
+description = "Standalone ContinuumBench harness plus RelBench and GraphBench experiment runners."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "scipy",
+    "pyarrow",
+    "torch",
+    "tabicl",
+    "tabpfn",
+    "relbench>=2.1.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+graphbench = ["graphbench-lib", "torchmetrics"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+"continuumbench_relbench.py" = ["E402", "E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false

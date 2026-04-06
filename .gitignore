@@ -1,0 +1,13 @@
+.DS_Store
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+artifacts/
+outputs/
+graphbench_data/
+cache/
