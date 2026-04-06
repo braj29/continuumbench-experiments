@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from scipy import sparse as sp_sparse
 
-from continuumbench_relbench import (
+from continuumbench_experiments.continuumbench.harness import (
     DatabaseSpec,
     ExperimentConfig,
     ExperimentRunner,
@@ -19,16 +19,16 @@ from continuumbench_relbench import (
     TaskSpec,
     _dense_feature_matrix,
     build_graph_degree_feature_table,
-    load_relbench_entity_problem,
     make_synthetic_relational_problem,
     stub_graph_fit_fn,
     stub_graph_predict_fn,
     stub_relational_fit_fn,
     stub_relational_predict_fn,
 )
+from continuumbench_experiments.continuumbench.sources import load_dataset_entity_problem
 
 
-class ContinuumBenchRelBenchTests(unittest.TestCase):
+class ContinuumBenchHarnessTests(unittest.TestCase):
     def test_dense_feature_matrix_from_sparse(self):
         X = sp_sparse.csr_matrix([[0.0, 1.0], [2.0, 0.0]])
         d = _dense_feature_matrix(X)
@@ -104,15 +104,15 @@ class ContinuumBenchRelBenchTests(unittest.TestCase):
         self.assertTrue(pd.isna(frame["transactions__recency_days"].iloc[1]))
         self.assertTrue(pd.isna(frame["transactions__recency_days"].iloc[2]))
 
-    def test_load_relbench_entity_problem_smoke(self):
+    def test_load_dataset_entity_problem_smoke(self):
         try:
-            db, task, split = load_relbench_entity_problem(
+            db, task, split = load_dataset_entity_problem(
                 "rel-f1",
                 "driver-top3",
                 download=True,
             )
         except Exception as exc:  # pragma: no cover
-            self.skipTest(f"RelBench unavailable in this environment: {exc}")
+            self.skipTest(f"Dataset registry unavailable in this environment: {exc}")
         self.assertEqual(task.target_col, "qualifying")
         self.assertTrue(split.train_mask.any())
         self.assertTrue(split.test_mask.any())

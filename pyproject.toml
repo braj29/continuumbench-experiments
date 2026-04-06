@@ -1,7 +1,7 @@
 [project]
 name = "continuumbench-experiments"
 version = "0.1.0"
-description = "Standalone ContinuumBench harness plus RelBench and GraphBench experiment runners."
+description = "Standalone ContinuumBench harness and tabular-model runner."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -13,12 +13,11 @@ dependencies = [
     "torch",
     "tabicl",
     "tabpfn",
-    "relbench>=2.1.1",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest"]
-graphbench = ["graphbench-lib", "torchmetrics"]
+task-source = ["relbench>=2.1.1"]
 
 [tool.uv]
 package = false
@@ -31,7 +30,7 @@ target-version = "py311"
 select = ["E", "F", "I"]
 
 [tool.ruff.lint.per-file-ignores]
-"continuumbench_relbench.py" = ["E402", "E501"]
+"src/continuumbench_experiments/continuumbench/harness.py" = ["E402", "E501"]
 
 [tool.ruff.format]
 quote-style = "double"

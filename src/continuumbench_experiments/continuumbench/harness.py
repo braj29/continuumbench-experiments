@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-ContinuumBench v1 experiment harness for RelBench-style temporal relational tasks.
+ContinuumBench v1 experiment harness for temporal relational tasks.
 
 What this file gives you:
 - A leakage-safe temporal feature builder for joined-table views:
@@ -18,13 +18,11 @@ What this file gives you:
 - Pluggable model adapters for LightGBM / tabular models / RT / RelGT
 
 What this file does NOT do by itself:
-- It does not bundle RelBench, RT, or RelGT code.
+- It does not bundle dataset registries, RT, or RelGT code.
 - The relational and graphified adapters are intentionally thin interfaces that you can
   wire to the official implementations you choose to use.
 
 Extras in this repo:
-- ``load_relbench_entity_problem`` maps a RelBench **entity** task into this harness so
-  joined / graph-degree / optional official RT refer to the same prediction problem.
 - ``GraphifiedSklearnAdapter`` + ``build_graph_degree_feature_table`` provide a
   dependency-light graph view (time-respecting incident counts on FK-linked tables).
 
@@ -480,7 +478,7 @@ class JoinedTableBuilder:
 
         For v1, this implementation supports the most common and practical case:
         the table directly references the central entity via a foreign key, or is a
-        parent lookup reachable in one hop. That already covers many RelBench-style
+        parent lookup reachable in one hop. That already covers many benchmark-style
         temporal event tables.
 
         Multi-hop aggregation beyond this can be added, but it is intentionally not
@@ -505,7 +503,7 @@ class JoinedTableBuilder:
             )
             return None
 
-        # Avoid pandas merge suffixes when task seed_time_col matches table.time_col (e.g. RelBench
+        # Avoid pandas merge suffixes when task seed_time_col matches table.time_col
         # "date" on both task rows and event tables).
         seed_alias = "__instance_seed_time__"
         base = instances[[entity_key, seed_time_col]].copy()
@@ -1394,7 +1392,7 @@ class ViewFactory:
         """
         Minimal graphified payload contract.
 
-        In practice, you will replace this with RelBench graph loaders / REG builders.
+        In practice, you will replace this with production graph loaders / REG builders.
         The key thing is that this object preserves seed-time semantics and the task table.
         """
         return {
@@ -1984,81 +1982,6 @@ def make_synthetic_relational_problem() -> Tuple[DatabaseSpec, TaskSpec, Tempora
         seed_time_col="seed_time",
         val_cutoff=pd.Timestamp("2024-03-01"),
         test_cutoff=pd.Timestamp("2024-03-10"),
-    )
-    return db, task, split
-
-
-def load_relbench_entity_problem(
-    dataset_name: str,
-    task_name: str,
-    *,
-    download: bool = True,
-) -> Tuple[DatabaseSpec, TaskSpec, TemporalSplit]:
-    """
-    Build ContinuumBench-style ``(db, task, split)`` from a RelBench **entity** task.
-
-    Train/val/test masks follow RelBench's published row order (train rows first, then val,
-    then test) so metrics stay aligned with RelBench / Relational Transformer expectations.
-    """
-    from relbench.base import EntityTask, TaskType
-    from relbench.tasks import get_task
-
-    rb_task = get_task(dataset_name, task_name, download=download)
-    if not isinstance(rb_task, EntityTask):
-        raise TypeError(
-            f"RelBench task {task_name!r} on {dataset_name!r} is not an EntityTask; "
-            "link-prediction / recommendation tasks are not wired in this harness."
-        )
-    if rb_task.task_type not in (TaskType.BINARY_CLASSIFICATION, TaskType.REGRESSION):
-        raise NotImplementedError(
-            f"RelBench task type {rb_task.task_type!r} is not supported yet "
-            "(supported: binary classification, regression)."
-        )
-
-    train_t = rb_task.get_table("train", mask_input_cols=False)
-    val_t = rb_task.get_table("val", mask_input_cols=False)
-    test_t = rb_task.get_table("test", mask_input_cols=False)
-    train_df = train_t.df.reset_index(drop=True)
-    val_df = val_t.df.reset_index(drop=True)
-    test_df = test_t.df.reset_index(drop=True)
-    task_table = pd.concat([train_df, val_df, test_df], axis=0, ignore_index=True)
-
-    n_tr = len(train_df)
-    n_va = len(val_df)
-    n_te = len(test_df)
-    train_mask = pd.Series([True] * n_tr + [False] * (n_va + n_te), index=task_table.index)
-    val_mask = pd.Series([False] * n_tr + [True] * n_va + [False] * n_te, index=task_table.index)
-    test_mask = pd.Series([False] * (n_tr + n_va) + [True] * n_te, index=task_table.index)
-    split = TemporalSplit(train_mask=train_mask, val_mask=val_mask, test_mask=test_mask)
-
-    rb_db = rb_task.dataset.get_db()
-    tables: Dict[str, TableSpec] = {}
-    for name, tbl in rb_db.table_dict.items():
-        tables[name] = TableSpec(
-            name=name,
-            df=tbl.df.copy(),
-            primary_key=tbl.pkey_col,
-            time_col=tbl.time_col,
-            foreign_keys=dict(tbl.fkey_col_to_pkey_table),
-        )
-    db = DatabaseSpec(tables=tables)
-
-    if rb_task.task_type == TaskType.BINARY_CLASSIFICATION:
-        ttype = "classification"
-        metric = "auroc"
-    else:
-        ttype = "regression"
-        metric = "mae"
-
-    task = TaskSpec(
-        name=f"{dataset_name}__{task_name}",
-        task_type=ttype,
-        target_col=rb_task.target_col,
-        metric_name=metric,
-        entity_table=rb_task.entity_table,
-        entity_key=rb_task.entity_col,
-        seed_time_col=rb_task.time_col,
-        task_table=task_table,
     )
     return db, task, split
 
