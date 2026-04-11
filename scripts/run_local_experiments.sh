@@ -77,6 +77,7 @@ case "${target}" in
 
   test)
     run "${UV_BIN}" run "${PYTHON_BIN}" -m unittest -q \
+      tests.test_models_tabular \
       tests.test_continuumbench_harness \
       tests.test_continuumbench_cli
     ;;

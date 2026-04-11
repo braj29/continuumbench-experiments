@@ -109,6 +109,7 @@ Notes:
 make test
 
 uv run python -m unittest -q \
+  tests.test_models_tabular \
   tests.test_continuumbench_harness \
   tests.test_continuumbench_cli
 ```
