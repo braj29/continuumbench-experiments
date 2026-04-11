@@ -67,41 +67,46 @@ RT_REPO_PATH=/path/to/relational-transformer \
 
 ## Snellius
 
-The repo includes a small Snellius workflow for `tabpfn` on one A100 GPU:
+The simplest Snellius workflow is:
 
 - `scripts/setup_snellius_env.sh`: create a project venv and warm the RelBench / TabPFN caches.
-- `scripts/run_snellius_continuumbench.sh`: run the benchmark inside an existing Snellius allocation.
-- `scripts/snellius_tabpfn_a100.sbatch`: example `sbatch` file for one `gpu_a100` quarter-node job.
+- `scripts/snellius_tabpfn_a100.sbatch`: final self-contained batch script for one A100 GPU job.
 
 Suggested flow on a Snellius login node:
 
 ```bash
-cd /scratch-shared/$USER/continuumbench-experiments
+cd ~/continuumbench-experiments
+git pull
 module purge
 module load 2024
-module avail Python
-export SNELLIUS_PYTHON_MODULE=Python/<version-from-module-avail>
+module load Python/3.12.3-GCCcore-13.3.0
 ./scripts/setup_snellius_env.sh
 ```
 
 Submit a TabPFN run:
 
 ```bash
-MODELS=tabpfn \
-DATASET_NAME=rel-f1 \
-TASK_NAME=driver-top3 \
-sbatch --account <your-project-id> scripts/snellius_tabpfn_a100.sbatch
+sbatch scripts/snellius_tabpfn_a100.sbatch
+```
+
+Watch the job:
+
+```bash
+squeue -u $USER
+tail -f slurm-cb-tabpfn-<jobid>.out
 ```
 
 Notes:
 
-- The job script keeps caches and scratch outputs under `/scratch-shared/$USER`, then copies run artifacts back to `outputs/snellius/<jobid>` in the repo.
-- If you skip `scripts/setup_snellius_env.sh`, set `DOWNLOAD_ARTIFACTS=1` at submit time so the compute job may fetch missing RelBench artifacts.
-- For interactive sanity checks, request a short GPU allocation first and run `bash scripts/run_snellius_continuumbench.sh` inside that shell.
+- The batch script follows SURF's "Final job script" pattern directly: `#SBATCH` header, load modules, use `$TMPDIR` for scratch output, run Python, then copy results back.
+- Defaults are embedded in the job script: dataset `rel-f1`, task `driver-top3`, model `tabpfn`, seed `7`, device `cuda`.
+- Results are copied to `outputs/snellius/<jobid>` in the repo after the job finishes.
+- If you skip `./scripts/setup_snellius_env.sh`, edit `DOWNLOAD_ARTIFACTS=1` near the top of the batch script before submitting.
 - The SURF documentation currently lists `gpu_a100` with a minimum allocation of `1 GPU + 18 CPU cores + 120 GiB memory`, and `/scratch-shared/<user>` is shared across nodes with automatic cleanup after 14 days:
+  https://servicedesk.surf.nl/wiki/spaces/WIKI/pages/30660226/Final+job+script
+  https://servicedesk.surf.nl/wiki/spaces/WIKI/pages/30660221/SLURM+batch+system
   https://servicedesk.surf.nl/wiki/spaces/WIKI/pages/30660209/Snellius+partitions+and+accounting
   https://servicedesk.surf.nl/wiki/spaces/WIKI/pages/85295828/Snellius+filesystems
-  https://servicedesk.surf.nl/wiki/spaces/WIKI/pages/30660234/Example+job+scripts
 
 ## Tests
 
