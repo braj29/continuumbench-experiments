@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from typing import Literal
 
+from tabpfn.constants import ModelVersion
 from tabicl import TabICLClassifier
 from tabpfn import TabPFNClassifier, TabPFNRegressor
 
 TABICL_CHECKPOINT_VERSION = "tabicl-classifier-v1.1-0506.ckpt"
 TABICL_AUTO_MAX_TRAIN_ROWS = 50_000
+TABPFN_MODEL_VERSION = ModelVersion.V2
 SUPPORTED_MODEL_NAMES = frozenset({"tabicl", "tabpfn"})
 TaskType = Literal["classification", "regression"]
 
@@ -35,7 +37,8 @@ def build_tabpfn(
     device: Literal["auto", "cpu", "cuda"] = "auto",
     ignore_pretraining_limits: bool = False,
 ) -> TabPFNClassifier:
-    return TabPFNClassifier(
+    return TabPFNClassifier.create_default_for_version(
+        TABPFN_MODEL_VERSION,
         n_estimators=16,
         device=device,
         ignore_pretraining_limits=ignore_pretraining_limits,
@@ -46,7 +49,8 @@ def build_tabpfn_regressor(
     device: Literal["auto", "cpu", "cuda"] = "auto",
     ignore_pretraining_limits: bool = False,
 ) -> TabPFNRegressor:
-    return TabPFNRegressor(
+    return TabPFNRegressor.create_default_for_version(
+        TABPFN_MODEL_VERSION,
         n_estimators=16,
         device=device,
         ignore_pretraining_limits=ignore_pretraining_limits,

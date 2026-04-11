@@ -54,10 +54,8 @@ python -m pip install -e ".[task-source]"
 python - <<'PY'
 import os
 
-import numpy as np
-
+from continuumbench_experiments.models import build_tabular_estimator
 from continuumbench_experiments.continuumbench.sources import load_dataset_entity_problem
-from tabpfn import TabPFNClassifier
 
 
 def enabled(name: str) -> bool:
@@ -76,9 +74,9 @@ if enabled("WARMUP_DATASET"):
 
 if enabled("WARMUP_TABPFN"):
     print("Warming TabPFN classifier cache...")
-    X = np.asarray([[0.0], [1.0], [2.0], [3.0]], dtype=np.float64)
-    y = np.asarray([0, 1, 0, 1], dtype=np.int64)
-    clf = TabPFNClassifier(n_estimators=1, device="cpu")
+    X = [[0.0], [1.0], [2.0], [3.0]]
+    y = [0, 1, 0, 1]
+    clf = build_tabular_estimator("tabpfn", "classification", device="cpu")
     clf.fit(X, y)
 PY
 
