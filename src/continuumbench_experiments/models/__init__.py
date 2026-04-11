@@ -1,5 +1,53 @@
 """Model builders used by ContinuumBench runners."""
 
-from .tabular import build_tabicl, build_tabpfn
+from .adapters import (
+    BaseViewModel,
+    ExternalGraphAdapter,
+    ExternalRelationalAdapter,
+    GraphifiedSklearnAdapter,
+    LightGBMTabularAdapter,
+    MeanDummyAdapter,
+    OfficialRelationalTransformerAdapter,
+    SklearnTabularAdapter,
+    _dense_feature_matrix,
+    stub_graph_fit_fn,
+    stub_graph_predict_fn,
+    stub_relational_fit_fn,
+    stub_relational_predict_fn,
+)
+from .tabular import (
+    SUPPORTED_MODEL_NAMES,
+    TABICL_AUTO_MAX_TRAIN_ROWS,
+    TABICL_CHECKPOINT_VERSION,
+    build_tabicl,
+    build_tabpfn,
+    build_tabpfn_regressor,
+    build_tabular_estimator,
+    default_max_train_rows,
+    resolve_tabicl_device,
+)
 
-__all__ = ["build_tabicl", "build_tabpfn"]
+__all__ = [
+    "BaseViewModel",
+    "ExternalGraphAdapter",
+    "ExternalRelationalAdapter",
+    "GraphifiedSklearnAdapter",
+    "LightGBMTabularAdapter",
+    "MeanDummyAdapter",
+    "OfficialRelationalTransformerAdapter",
+    "SklearnTabularAdapter",
+    "_dense_feature_matrix",
+    "SUPPORTED_MODEL_NAMES",
+    "TABICL_AUTO_MAX_TRAIN_ROWS",
+    "TABICL_CHECKPOINT_VERSION",
+    "build_tabicl",
+    "build_tabpfn",
+    "build_tabpfn_regressor",
+    "build_tabular_estimator",
+    "default_max_train_rows",
+    "resolve_tabicl_device",
+    "stub_graph_fit_fn",
+    "stub_graph_predict_fn",
+    "stub_relational_fit_fn",
+    "stub_relational_predict_fn",
+]

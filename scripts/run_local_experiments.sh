@@ -10,10 +10,26 @@ UV_BIN="${UV_BIN:-uv}"
 
 DATASET_NAME="${DATASET_NAME:-rel-f1}"
 TASK_NAME="${TASK_NAME:-driver-top3}"
+MODELS="${MODELS:-tabicl,tabpfn}"
 DEVICE="${DEVICE:-auto}"
 SEED="${SEED:-7}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-outputs/local_runs}"
 RT_REPO_PATH="${RT_REPO_PATH:-$REPO_ROOT/relational-transformer}"
+DOWNLOAD_ARTIFACTS="${DOWNLOAD_ARTIFACTS:-true}"
+
+download_artifacts_spec="${DOWNLOAD_ARTIFACTS,,}"
+case "${download_artifacts_spec}" in
+  1|true|yes)
+    download_artifacts_args=(--download-artifacts)
+    ;;
+  0|false|no)
+    download_artifacts_args=(--no-download-artifacts)
+    ;;
+  *)
+    echo "DOWNLOAD_ARTIFACTS must be one of: true, false, 1, 0, yes, no" >&2
+    exit 1
+    ;;
+esac
 
 usage() {
   cat <<EOF
@@ -30,10 +46,12 @@ Targets:
 Environment overrides:
   DATASET_NAME       default: ${DATASET_NAME}
   TASK_NAME          default: ${TASK_NAME}
+  MODELS             default: ${MODELS}
   DEVICE             default: ${DEVICE}
   SEED               default: ${SEED}
   OUTPUT_ROOT        default: ${OUTPUT_ROOT}
   RT_REPO_PATH       default: ${RT_REPO_PATH}
+  DOWNLOAD_ARTIFACTS default: ${DOWNLOAD_ARTIFACTS}
 EOF
 }
 
@@ -59,13 +77,14 @@ case "${target}" in
 
   test)
     run "${UV_BIN}" run "${PYTHON_BIN}" -m unittest -q \
-      tests.test_continuumbench_harness
+      tests.test_continuumbench_harness \
+      tests.test_continuumbench_cli
     ;;
 
   continuumbench-smoke)
     run "${UV_BIN}" run "${PYTHON_BIN}" continuumbench_tabfm_run.py \
       --task-source synthetic \
-      --models tabicl,tabpfn \
+      --models "${MODELS}" \
       --seed "${SEED}" \
       --device "${DEVICE}" \
       --output-dir "${OUTPUT_ROOT}/continuumbench_smoke"
@@ -76,7 +95,8 @@ case "${target}" in
       --task-source dataset \
       --dataset-name "${DATASET_NAME}" \
       --task-name "${TASK_NAME}" \
-      --models tabicl,tabpfn \
+      "${download_artifacts_args[@]}" \
+      --models "${MODELS}" \
       --seed "${SEED}" \
       --device "${DEVICE}" \
       --output-dir "${OUTPUT_ROOT}/continuumbench"
@@ -88,7 +108,8 @@ case "${target}" in
       --task-source dataset \
       --dataset-name "${DATASET_NAME}" \
       --task-name "${TASK_NAME}" \
-      --models tabicl,tabpfn \
+      "${download_artifacts_args[@]}" \
+      --models "${MODELS}" \
       --seed "${SEED}" \
       --device "${DEVICE}" \
       --use-official-rt-relational \

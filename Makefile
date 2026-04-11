@@ -8,19 +8,23 @@ PYTHON_BIN ?= python
 UV_BIN ?= uv
 DATASET_NAME ?= rel-f1
 TASK_NAME ?= driver-top3
+MODELS ?= tabicl,tabpfn
 DEVICE ?= auto
 SEED ?= 7
 OUTPUT_ROOT ?= outputs/local_runs
 RT_REPO_PATH ?= $(CURDIR)/relational-transformer
+DOWNLOAD_ARTIFACTS ?= true
 
 export PYTHON_BIN
 export UV_BIN
 export DATASET_NAME
 export TASK_NAME
+export MODELS
 export DEVICE
 export SEED
 export OUTPUT_ROOT
 export RT_REPO_PATH
+export DOWNLOAD_ARTIFACTS
 
 .PHONY: help setup test continuumbench-smoke continuumbench continuumbench-rt
 

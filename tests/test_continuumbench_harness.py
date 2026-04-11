@@ -122,14 +122,18 @@ class ContinuumBenchHarnessTests(unittest.TestCase):
         left_df = pd.DataFrame(
             {
                 "user_id": [1, 2, 1, 2],
-                "seed_time": pd.to_datetime(["2024-03-20", "2024-02-10", "2024-02-10", "2024-03-20"]),
+                "seed_time": pd.to_datetime(
+                    ["2024-03-20", "2024-02-10", "2024-02-10", "2024-03-20"]
+                ),
                 "label": [1, 0, 0, 1],
             }
         )
         right_df = pd.DataFrame(
             {
                 "user_id": [1, 1, 2, 2],
-                "updated_at": pd.to_datetime(["2024-01-01", "2024-03-01", "2024-01-15", "2024-02-20"]),
+                "updated_at": pd.to_datetime(
+                    ["2024-01-01", "2024-03-01", "2024-01-15", "2024-02-20"]
+                ),
                 "age": [10, 11, 20, 21],
             }
         )
@@ -201,7 +205,11 @@ class ContinuumBenchHarnessTests(unittest.TestCase):
                 split=split,
                 joined_table_cfgs=[
                     JoinedTableConfig(view_name="jt_entity", max_path_hops=1),
-                    JoinedTableConfig(view_name="jt_temporalagg", max_path_hops=1, lookback_days=30),
+                    JoinedTableConfig(
+                        view_name="jt_temporalagg",
+                        max_path_hops=1,
+                        lookback_days=30,
+                    ),
                 ],
                 joined_models=joined_models,
                 relational_models=relational_models,
