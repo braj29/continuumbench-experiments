@@ -23,7 +23,7 @@ class OfficialRtAdapterTests(unittest.TestCase):
             )
 
             with mock.patch(
-                "continuumbench_experiments.models.adapters.platform.system",
+                "continuumbench_experiments.models.adapter_relational.platform.system",
                 return_value="Darwin",
             ):
                 with self.assertRaisesRegex(RuntimeError, "Linux \\+ CUDA"):
@@ -51,11 +51,11 @@ class OfficialRtAdapterTests(unittest.TestCase):
             )
 
             with mock.patch(
-                "continuumbench_experiments.models.adapters.platform.system",
+                "continuumbench_experiments.models.adapter_relational.platform.system",
                 return_value="Linux",
             ):
                 with mock.patch(
-                    "continuumbench_experiments.models.adapters.subprocess.run",
+                    "continuumbench_experiments.models.adapter_relational.subprocess.run",
                     return_value=probe,
                 ):
                     with self.assertRaisesRegex(RuntimeError, "cuda_available=False"):
