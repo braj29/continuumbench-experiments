@@ -8,7 +8,7 @@ from tabpfn.constants import ModelVersion
 from tabicl import TabICLClassifier
 from tabpfn import TabPFNClassifier, TabPFNRegressor
 
-TABICL_CHECKPOINT_VERSION = "tabicl-classifier-v1.1-0506.ckpt"
+TABICL_CHECKPOINT_VERSION = "tabicl-classifier-v1.1-20250506.ckpt"
 TABICL_AUTO_MAX_TRAIN_ROWS = 50_000
 TABPFN_MODEL_VERSION = ModelVersion.V2
 SUPPORTED_MODEL_NAMES = frozenset({"tabicl", "tabpfn"})
@@ -68,6 +68,17 @@ def resolve_tabicl_device(
     if spec in {"none", "default"}:
         return None
     return device_spec.strip() if device_spec is not None else None
+
+
+def resolve_tabpfn_device(
+    device_spec: str | None,
+    *,
+    platform_name: str | None,
+) -> str:
+    spec = (device_spec or "auto").strip().lower()
+    if spec == "auto":
+        return "cpu" if platform_name == "Darwin" else "auto"
+    return device_spec.strip() if device_spec is not None else "auto"
 
 
 def default_max_train_rows(model_name: str, explicit_cap: int | None = None) -> int | None:

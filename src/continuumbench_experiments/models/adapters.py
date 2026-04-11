@@ -3,6 +3,7 @@ from __future__ import annotations
 import abc
 import json
 import os
+import platform
 import re
 import subprocess
 import sys
@@ -535,6 +536,55 @@ class OfficialRelationalTransformerAdapter(BaseViewModel):
                 return float(matches[-1])
         return None
 
+    def _validate_runtime_environment(self, repo_path: Path) -> None:
+        if platform.system() != "Linux":
+            raise RuntimeError(
+                "Official Relational Transformer is not runnable on this machine. "
+                "The upstream runtime expects Linux + CUDA. "
+                "Use Snellius or another Linux GPU box."
+            )
+
+        probe = subprocess.run(
+            [
+                self.python_executable,
+                "-c",
+                (
+                    "import json, platform\n"
+                    "import torch\n"
+                    "print(json.dumps({'platform': platform.system(), "
+                    "'cuda_available': bool(torch.cuda.is_available())}))\n"
+                ),
+            ],
+            cwd=str(repo_path),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if probe.returncode != 0:
+            tail = "\n".join(((probe.stdout or "") + "\n" + (probe.stderr or "")).splitlines()[-40:])
+            raise RuntimeError(
+                "Official RT runtime probe failed for the configured python executable.\n"
+                f"--- tail ---\n{tail}"
+            )
+
+        try:
+            payload = json.loads((probe.stdout or "").strip())
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                "Official RT runtime probe returned unexpected output.\n"
+                f"stdout={probe.stdout!r}\nstderr={probe.stderr!r}"
+            ) from exc
+
+        runtime_platform = payload.get("platform")
+        cuda_available = bool(payload.get("cuda_available"))
+        if runtime_platform != "Linux" or not cuda_available:
+            raise RuntimeError(
+                "Official Relational Transformer requires a Linux + CUDA runtime "
+                f"in the target python environment. Detected platform={runtime_platform!r}, "
+                f"cuda_available={cuda_available}. "
+                "Use Snellius or another Linux GPU box."
+            )
+
     def fit(self, train_data: Any, val_data: Optional[Any], task: TaskSpec) -> dict[str, Any]:
         repo_path = Path(self.rt_repo_path).expanduser().resolve()
         rt_main_path = repo_path / "rt" / "main.py"
@@ -542,6 +592,7 @@ class OfficialRelationalTransformerAdapter(BaseViewModel):
             raise FileNotFoundError(
                 f"Official RT repo not found at '{repo_path}'. Missing rt/main.py."
             )
+        self._validate_runtime_environment(repo_path)
 
         env = os.environ.copy()
         env["RT_MAIN_CONFIG"] = json.dumps(self._rt_main_config())

@@ -57,6 +57,9 @@ MODELS=tabpfn make continuumbench
 MODELS=tabpfn ./scripts/run_local_experiments.sh continuumbench
 ```
 
+The local wrapper also passes `--tabpfn-ignore-pretraining-limits` by default, since the
+current `rel-f1/driver-top3` preprocessing path can exceed TabPFN's nominal feature cap.
+
 Official relational-transformer track:
 
 ```bash
@@ -100,6 +103,7 @@ Notes:
 
 - The batch script follows SURF's "Final job script" pattern directly: `#SBATCH` header, load modules, use `$TMPDIR` for scratch output, run Python, then copy results back.
 - Defaults are embedded in the job script: dataset `rel-f1`, task `driver-top3`, model `tabpfn`, seed `7`, device `cuda`.
+- The batch script also enables `--tabpfn-ignore-pretraining-limits` by default because this benchmark can exceed TabPFN's nominal 500-feature limit after preprocessing.
 - Results are copied to `outputs/snellius/<jobid>` in the repo after the job finishes.
 - If you skip `./scripts/setup_snellius_env.sh`, edit `DOWNLOAD_ARTIFACTS=1` near the top of the batch script before submitting.
 - The SURF documentation currently lists `gpu_a100` with a minimum allocation of `1 GPU + 18 CPU cores + 120 GiB memory`, and `/scratch-shared/<user>` is shared across nodes with automatic cleanup after 14 days:
@@ -114,6 +118,8 @@ Notes:
 make test
 
 uv run python -m unittest -q \
+  tests.test_models_adapters \
+  tests.test_models_device_resolution \
   tests.test_models_tabular \
   tests.test_continuumbench_harness \
   tests.test_continuumbench_cli

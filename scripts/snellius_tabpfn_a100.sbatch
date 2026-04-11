@@ -19,6 +19,7 @@ MODELS="${MODELS:-tabpfn}"
 SEED="${SEED:-7}"
 DEVICE="${DEVICE:-cuda}"
 DOWNLOAD_ARTIFACTS="${DOWNLOAD_ARTIFACTS:-0}"
+TABPFN_IGNORE_PRETRAINING_LIMITS="${TABPFN_IGNORE_PRETRAINING_LIMITS:-1}"
 SNELLIUS_STACK_MODULE="${SNELLIUS_STACK_MODULE:-2024}"
 SNELLIUS_PYTHON_MODULE="${SNELLIUS_PYTHON_MODULE:-Python/3.12.3-GCCcore-13.3.0}"
 
@@ -53,11 +54,15 @@ export OMP_NUM_THREADS="${OMP_NUM_THREADS:-${SLURM_CPUS_PER_TASK:-1}}"
 export MKL_NUM_THREADS="${MKL_NUM_THREADS:-${SLURM_CPUS_PER_TASK:-1}}"
 export PYTHONUNBUFFERED=1
 
+lowercase() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
 # Create output directory on scratch
 mkdir -p "${JOB_OUTPUT_DIR}" "${RESULTS_DIR}"
 
 download_artifacts_flag="--no-download-artifacts"
-case "${DOWNLOAD_ARTIFACTS,,}" in
+case "$(lowercase "${DOWNLOAD_ARTIFACTS}")" in
   1|true|yes)
     download_artifacts_flag="--download-artifacts"
     ;;
@@ -65,6 +70,19 @@ case "${DOWNLOAD_ARTIFACTS,,}" in
     ;;
   *)
     echo "DOWNLOAD_ARTIFACTS must be one of: true, false, 1, 0, yes, no" >&2
+    exit 1
+    ;;
+esac
+
+tabpfn_limits_flag=""
+case "$(lowercase "${TABPFN_IGNORE_PRETRAINING_LIMITS}")" in
+  1|true|yes)
+    tabpfn_limits_flag="--tabpfn-ignore-pretraining-limits"
+    ;;
+  0|false|no)
+    ;;
+  *)
+    echo "TABPFN_IGNORE_PRETRAINING_LIMITS must be one of: true, false, 1, 0, yes, no" >&2
     exit 1
     ;;
 esac
@@ -78,6 +96,7 @@ python "${REPO_ROOT}/continuumbench_tabfm_run.py" \
   --seed "${SEED}" \
   --device "${DEVICE}" \
   "${download_artifacts_flag}" \
+  ${tabpfn_limits_flag} \
   --output-dir "${JOB_OUTPUT_DIR}"
 
 # Copy output directory from scratch back to the repo

@@ -20,7 +20,11 @@ DEVICE="${DEVICE:-cuda}"
 SEED="${SEED:-7}"
 DOWNLOAD_ARTIFACTS="${DOWNLOAD_ARTIFACTS:-0}"
 
-download_artifacts_spec="${DOWNLOAD_ARTIFACTS,,}"
+lowercase() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+download_artifacts_spec="$(lowercase "${DOWNLOAD_ARTIFACTS}")"
 case "${download_artifacts_spec}" in
   1|true|yes)
     download_artifacts_args=(--download-artifacts)

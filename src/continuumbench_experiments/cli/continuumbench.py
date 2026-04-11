@@ -31,6 +31,7 @@ from ..models import (
     build_tabular_estimator,
     default_max_train_rows,
     resolve_tabicl_device,
+    resolve_tabpfn_device,
     stub_relational_fit_fn,
     stub_relational_predict_fn,
 )
@@ -256,10 +257,14 @@ def _validate_models_for_task(models: list[str], task: TaskSpec) -> None:
 
 
 def _build_estimator(model_name: str, args: argparse.Namespace, task: TaskSpec):
+    tabpfn_device = resolve_tabpfn_device(
+        args.device,
+        platform_name=platform.system(),
+    )
     return build_tabular_estimator(
         model_name,
         task.task_type,
-        device=args.device,
+        device=tabpfn_device,
         tabicl_device=_tabicl_runtime_device(args),
         tabicl_use_amp=args.tabicl_use_amp,
         ignore_pretraining_limits=args.tabpfn_ignore_pretraining_limits,

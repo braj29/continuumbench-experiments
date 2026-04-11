@@ -14,6 +14,7 @@ SEED ?= 7
 OUTPUT_ROOT ?= outputs/local_runs
 RT_REPO_PATH ?= $(CURDIR)/relational-transformer
 DOWNLOAD_ARTIFACTS ?= true
+TABPFN_IGNORE_PRETRAINING_LIMITS ?= true
 
 export PYTHON_BIN
 export UV_BIN
@@ -25,6 +26,7 @@ export SEED
 export OUTPUT_ROOT
 export RT_REPO_PATH
 export DOWNLOAD_ARTIFACTS
+export TABPFN_IGNORE_PRETRAINING_LIMITS
 
 .PHONY: help setup test continuumbench-smoke continuumbench continuumbench-rt
 

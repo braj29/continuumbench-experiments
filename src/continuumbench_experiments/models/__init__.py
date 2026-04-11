@@ -26,6 +26,7 @@ from .tabular import (
     build_tabular_estimator,
     default_max_train_rows,
     resolve_tabicl_device,
+    resolve_tabpfn_device,
 )
 
 __all__ = [
@@ -48,6 +49,7 @@ __all__ = [
     "build_tabular_estimator",
     "default_max_train_rows",
     "resolve_tabicl_device",
+    "resolve_tabpfn_device",
     "stub_graph_fit_fn",
     "stub_graph_predict_fn",
     "stub_relational_fit_fn",

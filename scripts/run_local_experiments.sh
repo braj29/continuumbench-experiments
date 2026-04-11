@@ -16,8 +16,13 @@ SEED="${SEED:-7}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-outputs/local_runs}"
 RT_REPO_PATH="${RT_REPO_PATH:-$REPO_ROOT/relational-transformer}"
 DOWNLOAD_ARTIFACTS="${DOWNLOAD_ARTIFACTS:-true}"
+TABPFN_IGNORE_PRETRAINING_LIMITS="${TABPFN_IGNORE_PRETRAINING_LIMITS:-true}"
 
-download_artifacts_spec="${DOWNLOAD_ARTIFACTS,,}"
+lowercase() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+download_artifacts_spec="$(lowercase "${DOWNLOAD_ARTIFACTS}")"
 case "${download_artifacts_spec}" in
   1|true|yes)
     download_artifacts_args=(--download-artifacts)
@@ -52,6 +57,7 @@ Environment overrides:
   OUTPUT_ROOT        default: ${OUTPUT_ROOT}
   RT_REPO_PATH       default: ${RT_REPO_PATH}
   DOWNLOAD_ARTIFACTS default: ${DOWNLOAD_ARTIFACTS}
+  TABPFN_IGNORE_PRETRAINING_LIMITS default: ${TABPFN_IGNORE_PRETRAINING_LIMITS}
 EOF
 }
 
@@ -59,6 +65,20 @@ run() {
   echo "+ $*"
   "$@"
 }
+
+tabpfn_limits_spec="$(lowercase "${TABPFN_IGNORE_PRETRAINING_LIMITS}")"
+case "${tabpfn_limits_spec}" in
+  1|true|yes)
+    tabpfn_limits_args=(--tabpfn-ignore-pretraining-limits)
+    ;;
+  0|false|no)
+    tabpfn_limits_args=()
+    ;;
+  *)
+    echo "TABPFN_IGNORE_PRETRAINING_LIMITS must be one of: true, false, 1, 0, yes, no" >&2
+    exit 1
+    ;;
+esac
 
 require_rt_repo() {
   if [[ ! -f "${RT_REPO_PATH}/rt/main.py" ]]; then
@@ -77,6 +97,8 @@ case "${target}" in
 
   test)
     run "${UV_BIN}" run "${PYTHON_BIN}" -m unittest -q \
+      tests.test_models_adapters \
+      tests.test_models_device_resolution \
       tests.test_models_tabular \
       tests.test_continuumbench_harness \
       tests.test_continuumbench_cli
@@ -88,6 +110,7 @@ case "${target}" in
       --models "${MODELS}" \
       --seed "${SEED}" \
       --device "${DEVICE}" \
+      "${tabpfn_limits_args[@]}" \
       --output-dir "${OUTPUT_ROOT}/continuumbench_smoke"
     ;;
 
@@ -100,6 +123,7 @@ case "${target}" in
       --models "${MODELS}" \
       --seed "${SEED}" \
       --device "${DEVICE}" \
+      "${tabpfn_limits_args[@]}" \
       --output-dir "${OUTPUT_ROOT}/continuumbench"
     ;;
 
@@ -113,6 +137,7 @@ case "${target}" in
       --models "${MODELS}" \
       --seed "${SEED}" \
       --device "${DEVICE}" \
+      "${tabpfn_limits_args[@]}" \
       --use-official-rt-relational \
       --rt-repo-path "${RT_REPO_PATH}" \
       --output-dir "${OUTPUT_ROOT}/continuumbench_rt"
