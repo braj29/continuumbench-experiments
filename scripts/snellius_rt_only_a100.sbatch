@@ -366,14 +366,13 @@ if [[ -f "${TEXT_EMB_PATH}" ]]; then
   echo "Text embeddings already exist (${TEXT_EMB_PATH}); skipping embed step."
 else
   echo "Generating text embeddings (${EMBEDDING_MODEL}) for ${DATASET_NAME}..."
-  python - <<PY
-import os, sys
-sys.path.insert(0, "${RT_REPO_PATH}")
-os.environ.setdefault("RELBENCH_CACHE_DIR", "${RELBENCH_CACHE_DIR}")
-from rt.embed import main as embed_main
-embed_main("${DATASET_NAME}", embedding_model="${EMBEDDING_MODEL}")
-print("Text embeddings written to ${TEXT_EMB_PATH}")
-PY
+  # Run embed.py as a real file so that multiprocessing.spawn can re-open it.
+  # (sentence_transformers uses multiprocessing; python - <<heredoc has no path.)
+  PYTHONPATH="${RT_REPO_PATH}${PYTHONPATH:+:${PYTHONPATH}}" \
+    python "${RT_REPO_PATH}/rt/embed.py" \
+      "${DATASET_NAME}" \
+      --embedding_model "${EMBEDDING_MODEL}"
+  echo "Text embeddings written to ${TEXT_EMB_PATH}"
 fi
 
 # Avoid interactive wandb prompts on cluster jobs.
