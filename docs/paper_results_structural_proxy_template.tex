@@ -269,7 +269,7 @@ flattening:
 This view is consumed by schema-native models such as the Relational
 Transformer~\citep{rt}.
 
-\paragraph{View 4: Graphified.}
+\paragraph{View 4: Structural-count proxy (current graph track).}
 The relational payload is augmented with graph construction metadata:
 \begin{lstlisting}
 {
@@ -278,12 +278,13 @@ The relational payload is augmented with graph construction metadata:
   "graph_config": {"neighborhood_size_k": K}
 }
 \end{lstlisting}
-For each prediction instance, a per-instance \texttt{HeteroData} subgraph
-is constructed with one entity node, temporally-filtered event nodes from
-all FK-linked tables (capped at $K$ nodes per table), and forward plus
-reverse edges.
-This view is consumed by graph models: RGCN, GraphSAGE (in-process), and
-RelGT/ULTRA (via subprocess adapter).
+In the current benchmark runs, this track is materialized as a
+count-feature proxy: for each target entity at seed time, it computes
+incident row-count features from linked tables (bounded by $K$).
+This makes the current graph track a structural tabular proxy rather than
+a full per-instance \texttt{HeteroData} graph pipeline.
+A full graphified implementation for GNN/graph-transformer models remains
+part of the next implementation stage.
 
 Table~\ref{tab:view_summary} summarizes the four views and their
 target model families.
@@ -300,7 +301,7 @@ View & Format & History & Target models \\
 \viewname{JT-Entity}       & Flat table   & None (static)         & TabPFN, TabICL, XGBoost \\
 \viewname{JT-TemporalAgg}  & Flat table   & Aggregated ($W$ days) & TabPFN, TabICL, XGBoost \\
 Relational                 & Multi-table  & Full (normalized)     & Relational Transformer (subprocess) \\
-Graphified                 & Per-instance \texttt{HeteroData}  & Full (structural, $\le K$ events/table) & RGCN, GraphSAGE, RelGT (subprocess), ULTRA (subprocess) \\
+Structural-count proxy     & Flat table (count features)  & Structural counts ($\le K$ linked rows/table) & TabPFN, TabICL, XGBoost (current); RGCN/GraphSAGE/RelGT/ULTRA in planned full graph view \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -321,7 +322,7 @@ We ablate each view's construction parameters:
         \viewname{JT-TemporalAgg},
   \item join depth $d \in \{1, 2\}$ for \viewname{JT-Entity},
   \item graph neighborhood budget $K \in \{100, 300, 500\}$ for the
-        graphified view.
+        structural-count proxy track.
 \end{itemize}
 High sensitivity to these parameters indicates brittleness in that
 representation family.
@@ -453,9 +454,9 @@ over $R_W(e_i, t_i)$:
 \end{align*}
 Missing values arise when no events fall within the window.
 
-\paragraph{Relational and graphified views.}
+\paragraph{Relational and structural-count proxy views.}
 Both views wrap the normalized database and task specification in a
-structured payload, with the graphified view adding
+structured payload, with the structural-count proxy adding
 \texttt{neighborhood\_size\_k} as a construction parameter.
 
 \subsection{Actual materialized examples for each view}
@@ -525,7 +526,7 @@ In Table~\ref{tab:jt_temporalagg_actual_example}, the shorthand columns map to:
 }
 \end{lstlisting}
 
-\paragraph{Graphified view (actual payload and derived row).}
+\paragraph{Structural-count proxy view (actual payload and derived row).}
 For the current benchmark runs in this repository, the graph branch is a
 structural count-based proxy. The payload and resulting row for the same
 instance are:
@@ -540,7 +541,7 @@ instance are:
 \begin{table}[h]
 \centering
 \small
-\caption{Actual graphified structural-count row for the same instance.}
+\caption{Actual structural-count proxy row for the same instance.}
 \label{tab:graphified_actual_example}
 \begin{tabular}{llllll}
 \toprule
@@ -569,7 +570,7 @@ The following components have been verified:
   \item temporal splits are consistent across all four views,
   \item \viewname{JT-Entity} and \viewname{JT-TemporalAgg} construction
         is correct on the synthetic task,
-  \item relational and graphified payloads are well-formed and
+  \item relational and structural-count proxy payloads are well-formed and
         accepted by downstream model interfaces.
 \end{itemize}
 
@@ -621,7 +622,7 @@ For the relational view:
         Requires Linux and CUDA; currently returns a \texttt{precomputed\_test\_metric}.
 \end{itemize}
 
-For the graphified view:
+For the graph track:
 \begin{itemize}
   \item \textbf{RGCN}: a relational graph convolutional network
         (\texttt{GCNConv} with per-type projections) trained in-process
@@ -645,8 +646,11 @@ gradient clipping.
 RelGT, ULTRA, and RT are integrated via subprocess adapters and return
 pre-computed test metrics.
 Results in Tables~\ref{tab:protocol-a-driver-top3}
-and~\ref{tab:protocol-b-driver-top3} currently cover joined-table
-baselines and count-feature graphified results; GNN and RT runs are
+and~\ref{tab:protocol-b-driver-top3} currently correspond to the
+TabPFN run (job \texttt{21782164}) and TabICL run (job \texttt{21782181})
+on joined-table views, together with the relational stub baseline
+(\texttt{rt-stub}) and structural-count proxy graph track.
+Full RT and full graph-model runs (RGCN/GraphSAGE/RelGT/ULTRA) are
 \todo{pending execution}.
 GPU peak VRAM is tracked automatically via
 \texttt{torch.cuda.max\_memory\_allocated()} for all GPU-accelerated
@@ -658,47 +662,57 @@ models and reported in the compute-cost analysis.
 \begin{table}[t]
 \centering
 \caption{Protocol~A results on \texttt{rel-f1/driver-top3}.
-         AUROC; chance level = 0.5. Results marked \dag{} are
-         from stub or count-feature implementations and will be
-         replaced with full model results.}
+         AUROC; chance level = 0.5. Values are from Snellius jobs
+         \texttt{21782164} (\texttt{MODELS=tabpfn}) and
+         \texttt{21782181} (\texttt{MODELS=tabicl}).}
 \label{tab:protocol-a-driver-top3}
 \begin{tabular}{llll}
 \toprule
-View & Model & AUROC & Status \\
+Model & View & AUROC & Notes \\
 \midrule
-\viewname{JT-Entity}                & TabPFN         & 0.469                  & Full \\
-\viewname{JT-Entity} ($d=1$)        & XGBoost        & \todo{pending}         & Full \\
-\viewname{JT-TemporalAgg} (30-day)  & TabPFN         & 0.682                  & Full \\
-\viewname{JT-TemporalAgg} (30-day)  & XGBoost        & \todo{pending}         & Full \\
-Relational                          & RT (subprocess)& \todo{pending}         & Subprocess\dag \\
-Graphified ($K=300$)                & Count features & 0.670                  & Partial\dag \\
-Graphified ($K=300$)                & RGCN           & \todo{pending}         & Full \\
-Graphified ($K=300$)                & GraphSAGE      & \todo{pending}         & Full \\
+TabPFN & \viewname{JT-Entity}                      & 0.469142 & joined-table \\
+TabPFN & \viewname{JT-TemporalAgg} ($W=30$, $d=1$) & 0.682405 & joined-table \\
+TabPFN & Relational (\texttt{rt-stub})             & 0.500000 & stub baseline \\
+TabPFN & Structural-count proxy ($K=300$)          & 0.669726 & graph track proxy \\
+TabICL & \viewname{JT-Entity}                      & 0.758720 & joined-table \\
+TabICL & \viewname{JT-TemporalAgg} ($W=30$, $d=1$) & 0.509530 & joined-table \\
+TabICL & Relational (\texttt{rt-stub})             & 0.500000 & stub baseline \\
+TabICL & Structural-count proxy ($K=300$)          & 0.611446 & graph track proxy \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:protocol-a-driver-top3} reveals a clear pattern.
-The static entity snapshot (\viewname{JT-Entity}) scores 0.469,
-below chance level.
-This indicates that static driver attributes (nationality, date of
-birth, driver reference code) contain essentially no signal for
-predicting near-term qualifying outcomes.
-Introducing temporal aggregates over a 30-day window (\viewname{JT-TemporalAgg})
-raises AUROC to 0.682, confirming that recent race history is a strong
-predictor.
-The count-feature graphified view (0.670) is competitive with the
-30-day aggregate, suggesting that the structural count of past
-linked records carries similar information to mean-aggregated statistics
-at this window size.
-XGBoost, RGCN, and GraphSAGE results are pending execution;
-RT results are pending subprocess integration on a CUDA node.
+Table~\ref{tab:protocol-a-driver-top3} shows model-dependent behavior.
+For TabPFN, \viewname{JT-Entity} is below chance (0.469142), while
+\viewname{JT-TemporalAgg} (0.682405) and structural-count proxy
+(0.669726) are substantially stronger.
+For TabICL, the pattern differs: \viewname{JT-Entity} is strongest
+(0.758720), \viewname{JT-TemporalAgg} at 30 days drops near chance
+(0.509530), and structural-count proxy is intermediate (0.611446).
+The relational score of 0.500000 in both runs comes from \texttt{rt-stub}
+and should be treated only as a placeholder, not as the official
+Relational Transformer result.
 
-\paragraph{Sub-chance entity performance.}
-The 0.469 AUROC of \viewname{JT-Entity} merits a note.
+\paragraph{Protocol A RIS.}
+The harness reports:
+\begin{itemize}
+  \item TabPFN: \(\RIS = 0.471116\),
+        \(\texttt{utility\_std} = 0.528884\),
+        \(\texttt{utility\_gap} = 1.169173\).
+  \item TabICL: \(\RIS = 0.597368\),
+        \(\texttt{utility\_std} = 0.402632\),
+        \(\texttt{utility\_gap} = 1.000000\).
+\end{itemize}
+Both values indicate representation sensitivity under Protocol~A.
+
+\paragraph{Contrasting entity behavior.}
+The 0.469142 AUROC of TabPFN on \viewname{JT-Entity} merits a note.
 At a \emph{dataset level}, chance performance is 0.5; individual
 model runs can fall slightly below due to finite-sample variance,
 class imbalance, or overfitting on small splits.
+In contrast, TabICL reaches 0.758720 on the same view, indicating that
+representation effects are strongly model-dependent even under identical
+task semantics.
 \todo{Report class imbalance ratio and confirm with multiple random
 seeds.}
 
@@ -707,45 +721,68 @@ seeds.}
 
 \begin{table}[t]
 \centering
-\caption{Protocol~B ablations on \texttt{rel-f1/driver-top3}.}
+\caption{Protocol~B ablations on \texttt{rel-f1/driver-top3} with TabPFN
+         (job \texttt{21782164}).}
 \label{tab:protocol-b-driver-top3}
 \begin{tabular}{llll}
 \toprule
 Parameter & Setting & View & AUROC \\
 \midrule
 \multirow{4}{*}{Lookback $W$}
-  & 7 days          & \viewname{JT-TemporalAgg} & 0.611 \\
-  & 30 days         & \viewname{JT-TemporalAgg} & 0.682 \\
-  & 90 days         & \viewname{JT-TemporalAgg} & \todo{pending} \\
-  & $\infty$ (all history) & \viewname{JT-TemporalAgg} & \textbf{0.802} \\
+  & 7 days          & \viewname{JT-TemporalAgg} ($d=1$) & 0.611400 \\
+  & 30 days         & \viewname{JT-TemporalAgg} ($d=1$) & 0.682405 \\
+  & 90 days         & \viewname{JT-TemporalAgg} ($d=1$) & 0.732056 \\
+  & $\infty$ (all history) & \viewname{JT-TemporalAgg} ($d=1$) & \textbf{0.802284} \\
 \midrule
 \multirow{2}{*}{Join depth $d$}
-  & $d=1$ & \viewname{JT-Entity} & 0.469 \\
-  & $d=2$ & \viewname{JT-Entity} & \todo{pending} \\
+  & $d=1$ & \viewname{JT-Entity} ($W=\mathrm{None}$) & 0.469142 \\
+  & $d=2$ & \viewname{JT-Entity} ($W=\mathrm{None}$) & 0.469142 \\
 \midrule
 \multirow{3}{*}{Neighborhood $K$}
-  & 100 & Graphified & 0.576 \\
-  & 300 & Graphified & 0.670 \\
-  & 500 & Graphified & 0.670 \\
+  & 100 & Structural-count proxy & 0.576381 \\
+  & 300 & Structural-count proxy & 0.669726 \\
+  & 500 & Structural-count proxy & 0.669726 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Protocol~B results in Table~\ref{tab:protocol-b-driver-top3} clarify
-the source of performance variation.
+\begin{table}[t]
+\centering
+\caption{Protocol~B ablations on \texttt{rel-f1/driver-top3} with TabICL
+         (job \texttt{21782181}).}
+\label{tab:protocol-b-driver-top3-tabicl}
+\begin{tabular}{llll}
+\toprule
+Parameter & Setting & View & AUROC \\
+\midrule
+\multirow{4}{*}{Lookback $W$}
+  & 7 days          & \viewname{JT-TemporalAgg} ($d=1$) & 0.588485 \\
+  & 30 days         & \viewname{JT-TemporalAgg} ($d=1$) & 0.510125 \\
+  & 90 days         & \viewname{JT-TemporalAgg} ($d=1$) & 0.580738 \\
+  & $\infty$ (all history) & \viewname{JT-TemporalAgg} ($d=1$) & \textbf{0.759909} \\
+\midrule
+\multirow{2}{*}{Join depth $d$}
+  & $d=1$ & \viewname{JT-Entity} ($W=\mathrm{None}$) & 0.758720 \\
+  & $d=2$ & \viewname{JT-Entity} ($W=\mathrm{None}$) & 0.758720 \\
+\midrule
+\multirow{3}{*}{Neighborhood $K$}
+  & 100 & Structural-count proxy & 0.566021 \\
+  & 300 & Structural-count proxy & 0.611446 \\
+  & 500 & Structural-count proxy & 0.611446 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\paragraph{Window sensitivity (\viewname{JT-TemporalAgg}).}
-Performance increases monotonically with lookback window size,
-reaching 0.802 when all available history is used.
-This is a strong effect: the gap between $W=7$ and
-$W=\infty$ is 0.191 AUROC points.
-The 90-day result (\todo{pending}) will quantify how much of the
-remaining gain comes from history beyond the first month.
-This indicates that for \texttt{driver-top3}, the predictive signal
-is distributed across the \emph{full career history} of a driver,
-not only recent races.
-Models that access only recent context (e.g., sliding-window
-approaches) will be at a systematic disadvantage on this task.
+Protocol~B results in Tables~\ref{tab:protocol-b-driver-top3}
+and~\ref{tab:protocol-b-driver-top3-tabicl} clarify the source of
+performance variation.
+
+\paragraph{Window sensitivity (\viewname{JT-TemporalAgg}) is model-specific.}
+For TabPFN, performance rises from 0.611400 ($W=7$) to 0.802284
+($W=\infty$), indicating a strong long-history benefit.
+For TabICL, $W=30$ is weak (0.510125), while $W=\infty$ recovers to
+0.759909, closer to the entity view. This suggests the effect of
+aggregation window depends on model family, not only on task signal.
 
 \paragraph{Join-depth sensitivity (\viewname{JT-Entity}).}
 We ablate join depth $d \in \{1, 2\}$.
@@ -753,11 +790,15 @@ At $d=1$, only direct entity attributes are included (e.g., the
 \texttt{drivers} row).
 At $d=2$, attributes of entities reachable via one FK hop are also
 denormalized (e.g., constructor attributes).
-Results for $d=2$ are \todo{pending}.
+For this run, $d=2$ matches $d=1$ exactly (both 0.469142), suggesting
+that deeper static joins do not help for TabPFN.
+For TabICL, $d=2$ also matches $d=1$ exactly (both 0.758720).
 
-\paragraph{Neighborhood sensitivity (Graphified).}
-Increasing $K$ from 100 to 300 improves AUROC from 0.576 to 0.670,
-but further increasing to $K=500$ yields no improvement.
+\paragraph{Neighborhood sensitivity (structural-count proxy).}
+Increasing $K$ from 100 to 300 improves AUROC for both models
+(TabPFN: 0.576381 \(\to\) 0.669726;
+TabICL: 0.566021 \(\to\) 0.611446),
+but further increasing to $K=500$ yields no improvement in either run.
 This saturation is consistent with the small number of incident tables
 in the \texttt{rel-f1} schema: once the neighborhood budget covers
 all linked qualifying and results records, additional budget adds
@@ -765,21 +806,25 @@ no new information.
 \todo{Verify with a schema that has deeper relational structure
 (e.g., \texttt{rel-amazon}) to test whether saturation persists.}
 
-\paragraph{RIS computation (preliminary).}
-Using the Protocol~A AUROC scores and $\mu_\text{chance} = 0.5$,
-$\mu_\text{oracle} = 0.802$ (best observed across all completed settings):
-\begin{align*}
-  u_\text{JT-Entity} &= (0.469 - 0.5) / (0.802 - 0.5) = -0.10, \\
-  u_\text{JT-TemporalAgg} &= (0.682 - 0.5) / 0.302 = 0.60, \\
-  u_\text{Graphified} &= (0.670 - 0.5) / 0.302 = 0.56.
-\end{align*}
-This yields $\RIS = 1 - \sigma(-0.10,\, 0.60,\, 0.56) \approx 0.65$,
-classifying \texttt{driver-top3} as \emph{representation-sensitive}
-($\RIS < 0.7$).
-These utilities are computed by \texttt{compute\_ris()} in the harness,
-which implements the chance/oracle normalization exactly as defined above.
-\todo{Recompute once RGCN/GraphSAGE/RT/XGBoost results are integrated;
-the oracle ceiling will likely rise, revising all utilities.}
+\paragraph{RIS computation (latest run).}
+The harness reports the following RIS values for
+\texttt{rel-f1/driver-top3}:
+\begin{itemize}
+  \item TabPFN, Protocol~A: \(\RIS = 0.471116\),
+        \(\texttt{utility\_std} = 0.528884\),
+        \(\texttt{utility\_gap} = 1.169173\).
+  \item TabPFN, Protocol~B: \(\RIS = 0.687582\),
+        \(\texttt{utility\_std} = 0.312418\),
+        \(\texttt{utility\_gap} = 1.102083\).
+  \item TabICL, Protocol~A: \(\RIS = 0.597368\),
+        \(\texttt{utility\_std} = 0.402632\),
+        \(\texttt{utility\_gap} = 1.000000\).
+  \item TabICL, Protocol~B: \(\RIS = 0.676962\),
+        \(\texttt{utility\_std} = 0.323038\),
+        \(\texttt{utility\_gap} = 0.961045\).
+\end{itemize}
+Across both models, Protocol~A and Protocol~B indicate non-trivial
+representation sensitivity.
 Macro-RIS across the full task suite will be reported via
 \texttt{compute\_macro\_ris()}, which averages per-task RIS values and
 reports the standard deviation across tasks.
@@ -800,7 +845,7 @@ the generality of \cb{} findings:
         [\emph{Adapter implemented; execution pending.}]
   \item \textbf{In-process GNN baselines.} Execute RGCN and GraphSAGE
         (fully implemented in \texttt{adapter\_graph\_nn.py}) on the
-        graphified view for all tasks.
+        full graphified view for all tasks.
         [\emph{Models implemented; execution pending.}]
   \item \textbf{RelGT and ULTRA baselines.} Execute RelGT via
         \texttt{RelGTSubprocessAdapter} and ULTRA via
@@ -832,24 +877,23 @@ the generality of \cb{} findings:
 \paragraph{Representation sensitivity is task-dependent.}
 The \texttt{driver-top3} experiments show that representation choice
 has a large effect on achievable performance for this task.
-Static entity information is nearly useless; historical aggregates are
-essential.
+However, the preferred view depends on the model: TabPFN benefits from
+temporal aggregation, while TabICL is strongest on the static entity
+view in the current runs.
 Whether this pattern generalizes to other relational tasks---or whether
 some tasks are truly representation-invariant---is precisely the
 question \cb{} is designed to answer at scale.
 
-\paragraph{Temporal depth matters more than representation family.}
-Within the joined-table family, the single largest performance gain
-comes from extending the lookback window from 30 days to all available
-history (0.682 $\to$ 0.802), not from switching representation
-families.
-This suggests that the most impactful design decision for practitioners
-is the temporal depth of feature engineering, not the choice between
-tabular and graph representations---at least for tasks with a strong
-career-history signal.
+\paragraph{Temporal depth and model interaction.}
+For TabPFN, extending lookback from 30 days to full history yields a
+large gain (0.682405 $\to$ 0.802284). For TabICL, full-history
+aggregation also helps relative to 30 days
+(0.510125 $\to$ 0.759909), but static entity remains competitive.
+This indicates that temporal feature design and model choice interact
+strongly, rather than one universally dominating the other.
 
-\paragraph{Graph neighborhood saturation.}
-The graphified view saturates at $K = 300$ for \texttt{rel-f1}.
+\paragraph{Structural neighborhood saturation.}
+The structural-count proxy saturates at $K = 300$ for \texttt{rel-f1}.
 This is expected given the shallow schema structure of the dataset.
 Richer schemas with deeper relational hierarchies may require larger
 budgets and may show greater variance in performance with $K$, making
@@ -857,7 +901,8 @@ Protocol~B a useful diagnostic tool.
 
 \paragraph{Limitations.}
 The current results cover a single dataset and task, and the relational
-and graph views are not yet backed by full model implementations.
+and graph tracks are not yet backed by full model implementations in the
+reported run (\texttt{rt-stub} and structural-count proxy were used).
 All conclusions should therefore be treated as preliminary until the
 full experimental suite is complete.
 Additionally, RIS as currently defined uses an empirical oracle
@@ -875,15 +920,16 @@ We have presented \cb{}, a tri-view benchmark for studying
 representation invariance in relational machine learning.
 \cb{} enforces identical task semantics and temporal safety guarantees
 across four derived views---joined-table entity, joined-table temporal
-aggregate, schema-native relational, and graphified---and provides a
+aggregate, schema-native relational, and a graph-oriented
+structural-count proxy---and provides a
 unified evaluation protocol for comparing tabular, relational, and
 graph-based models.
 
 Our initial results on \texttt{rel-f1 / driver-top3} demonstrate that
 representation choice has a substantial impact on predictive
-performance for this task, with the temporal aggregate view outperforming
-the static entity view by more than 0.3 AUROC points at full
-lookback.
+performance for this task, and that this effect is model-dependent:
+TabPFN is strongest with temporal aggregation, while TabICL is strongest
+on the static entity view in the current Protocol~A run.
 The Representation Invariance Score formalizes this sensitivity in a
 task-agnostic way.
 

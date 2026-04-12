@@ -158,6 +158,14 @@ def _add_model_args(parser: argparse.ArgumentParser) -> None:
         default=True,
         help="Run Protocol B ablations in addition to Protocol A.",
     )
+    parser.add_argument(
+        "--relational-only",
+        action="store_true",
+        help=(
+            "Run only the relational view in Protocol A (skip joined-table and graph tracks). "
+            "Protocol B is skipped in this mode."
+        ),
+    )
 
 
 def _add_graph_model_args(parser: argparse.ArgumentParser) -> None:
@@ -678,11 +686,19 @@ def _run_model(
     model_out.mkdir(parents=True, exist_ok=True)
 
     runner = _make_runner(model_out, args.seed)
-    joined_models = [_build_joined_model(model_name, args, problem.task)]
-    relational_models = _build_relational_models(args, problem.task)
-    graph_models = [_build_graph_model(model_name, args, problem.task)]
+    relational_only = bool(getattr(args, "relational_only", False))
 
-    _announce_protocol(model_name, "Protocol A")
+    joined_models = [] if relational_only else [_build_joined_model(model_name, args, problem.task)]
+    relational_models = _build_relational_models(args, problem.task)
+    graph_models = [] if relational_only else [_build_graph_model(model_name, args, problem.task)]
+
+    protocol_model_name = (
+        relational_models[0].name
+        if relational_only and relational_models
+        else model_name
+    )
+
+    _announce_protocol(protocol_model_name, "Protocol A")
     summary_a = runner.run_protocol_a(
         db=problem.db,
         task=problem.task,
@@ -698,12 +714,13 @@ def _run_model(
     manifest = {
         **_task_source_metadata(args),
         "output_dir": str(model_out),
+        "relational_only": relational_only,
         **_relational_backend_metadata(args, relational_models),
         "protocol_a": _protocol_artifacts(problem.task.name, "protocol_a"),
     }
 
-    if args.run_protocol_b:
-        _announce_protocol(model_name, "Protocol B")
+    if args.run_protocol_b and not relational_only:
+        _announce_protocol(protocol_model_name, "Protocol B")
         summary_b = runner.run_protocol_b(
             db=problem.db,
             task=problem.task,
@@ -716,6 +733,13 @@ def _run_model(
         _print_protocol_summary(summary_b)
         _print_protocol_ris(summary_b, "Protocol B")
         manifest["protocol_b"] = _protocol_artifacts(problem.task.name, "protocol_b")
+    elif args.run_protocol_b and relational_only:
+        print(
+            "continuumbench: skipping Protocol B in --relational-only mode "
+            "(Protocol B only ablates joined-table and graph tracks).",
+            file=sys.stderr,
+            flush=True,
+        )
 
     return manifest
 
@@ -729,6 +753,11 @@ def _write_manifest(out_root: Path, manifest: dict[str, dict[str, object]]) -> N
 
 def run(args: argparse.Namespace) -> None:
     models = _parse_models(args.models)
+    if args.relational_only and not args.use_official_rt_relational:
+        raise ValueError(
+            "--relational-only requires --use-official-rt-relational. "
+            "This mode is intended for official RT-only benchmarking."
+        )
     _emit_runtime_warnings(models, args)
 
     problem = _load_problem(args)
@@ -738,16 +767,35 @@ def run(args: argparse.Namespace) -> None:
     out_root.mkdir(parents=True, exist_ok=True)
     protocol_configs = _default_protocol_configs()
 
-    manifest = {
-        model_name: _run_model(
-            model_name=model_name,
-            args=args,
-            problem=problem,
-            protocol_configs=protocol_configs,
-            out_root=out_root,
-        )
-        for model_name in models
-    }
+    if args.relational_only:
+        selected_model = models[0]
+        if len(models) > 1:
+            print(
+                "continuumbench: --relational-only ignores extra --models entries; "
+                f"using first model token {selected_model!r} as output folder key.",
+                file=sys.stderr,
+                flush=True,
+            )
+        manifest = {
+            "rt-official": _run_model(
+                model_name=selected_model,
+                args=args,
+                problem=problem,
+                protocol_configs=protocol_configs,
+                out_root=out_root,
+            )
+        }
+    else:
+        manifest = {
+            model_name: _run_model(
+                model_name=model_name,
+                args=args,
+                problem=problem,
+                protocol_configs=protocol_configs,
+                out_root=out_root,
+            )
+            for model_name in models
+        }
     _write_manifest(out_root, manifest)
 
 

@@ -257,8 +257,15 @@ class OfficialRelationalTransformerAdapter(BaseViewModel):
         logs = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
         if result.returncode != 0:
             tail = "\n".join(logs.splitlines()[-120:])
+            dependency_hint = ""
+            if "ModuleNotFoundError: No module named 'wandb'" in logs:
+                dependency_hint = (
+                    "\nHint: install RT runtime dependency in the same python env, e.g. "
+                    "`python -m pip install wandb`."
+                )
             raise RuntimeError(
-                f"Official RT run failed. returncode={result.returncode}\n--- tail ---\n{tail}"
+                "Official RT run failed. "
+                f"returncode={result.returncode}{dependency_hint}\n--- tail ---\n{tail}"
             )
 
         metric = self._extract_test_metric(logs)
