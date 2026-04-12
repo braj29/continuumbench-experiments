@@ -311,6 +311,78 @@ import rt.data  # noqa: F401
 print("RT import preflight passed.")
 PY
 
+# ---------------------------------------------------------------------------
+# RT preprocessing: nodes.rkyv / offsets.rkyv / p2f_adj.rkyv / text_emb_*.bin
+# ---------------------------------------------------------------------------
+# pre.rs hardcodes ~/scratch/relbench/{db} for input and
+# ~/scratch/pre/{db} for output.  We make ~/scratch/relbench a symlink to
+# the relbench cache used by the rest of the pipeline.
+RT_PRE_DIR="${RT_PREPROCESSED_ROOT}/${DATASET_NAME}"
+EMBEDDING_MODEL="${EMBEDDING_MODEL:-all-MiniLM-L12-v2}"
+
+# 1. Ensure ~/scratch/relbench -> $RELBENCH_CACHE_DIR symlink exists.
+mkdir -p "${HOME}/scratch"
+if [[ ! -e "${HOME}/scratch/relbench" ]]; then
+  echo "Creating symlink ${HOME}/scratch/relbench -> ${RELBENCH_CACHE_DIR}"
+  ln -s "${RELBENCH_CACHE_DIR}" "${HOME}/scratch/relbench"
+elif [[ ! -L "${HOME}/scratch/relbench" ]]; then
+  echo "WARNING: ${HOME}/scratch/relbench exists but is not a symlink." >&2
+  echo "Expected it to point to ${RELBENCH_CACHE_DIR}." >&2
+fi
+
+# 2. Download RelBench parquet files if not present (pre.rs reads them).
+python - <<PY
+import os, sys
+sys.path.insert(0, "${RT_REPO_PATH}")
+os.environ.setdefault("RELBENCH_CACHE_DIR", "${RELBENCH_CACHE_DIR}")
+from relbench.datasets import get_dataset
+from relbench.tasks import get_task
+print("Ensuring RelBench parquet data for ${DATASET_NAME}/${TASK_NAME}...")
+get_dataset("${DATASET_NAME}", download=True)
+get_task("${DATASET_NAME}", "${TASK_NAME}", download=True)
+print("RelBench data ready.")
+PY
+
+# 3. Build and run the rustler pre binary if rkyv files are missing.
+RUSTLER_BIN="${RT_REPO_PATH}/rustler/target/release/rustler"
+
+rt_rkyv_files_exist() {
+  [[ -f "${RT_PRE_DIR}/nodes.rkyv"   ]] \
+  && [[ -f "${RT_PRE_DIR}/offsets.rkyv" ]] \
+  && [[ -f "${RT_PRE_DIR}/p2f_adj.rkyv" ]]
+}
+
+if rt_rkyv_files_exist; then
+  echo "RT rkyv files already exist for ${DATASET_NAME}; skipping rustler pre."
+else
+  echo "Running rustler pre ${DATASET_NAME}..."
+  if [[ ! -x "${RUSTLER_BIN}" ]]; then
+    echo "Building rustler binary (cargo build --release)..."
+    (
+      cd "${RT_REPO_PATH}/rustler"
+      cargo build --release --bin rustler
+    )
+  fi
+  mkdir -p "${RT_PRE_DIR}"
+  "${RUSTLER_BIN}" pre "${DATASET_NAME}"
+fi
+
+# 4. Generate text embeddings if missing.
+TEXT_EMB_PATH="${RT_PRE_DIR}/text_emb_${EMBEDDING_MODEL}.bin"
+if [[ -f "${TEXT_EMB_PATH}" ]]; then
+  echo "Text embeddings already exist (${TEXT_EMB_PATH}); skipping embed step."
+else
+  echo "Generating text embeddings (${EMBEDDING_MODEL}) for ${DATASET_NAME}..."
+  python - <<PY
+import os, sys
+sys.path.insert(0, "${RT_REPO_PATH}")
+os.environ.setdefault("RELBENCH_CACHE_DIR", "${RELBENCH_CACHE_DIR}")
+from rt.embed import main as embed_main
+embed_main("${DATASET_NAME}", embedding_model="${EMBEDDING_MODEL}")
+print("Text embeddings written to ${TEXT_EMB_PATH}")
+PY
+fi
+
 # Avoid interactive wandb prompts on cluster jobs.
 export WANDB_MODE="${WANDB_MODE:-disabled}"
 export WANDB_SILENT="${WANDB_SILENT:-true}"
