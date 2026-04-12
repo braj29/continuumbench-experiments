@@ -83,6 +83,7 @@ The simplest Snellius workflow is:
 
 - `scripts/setup_snellius_env.sh`: create a project venv and warm the RelBench / TabPFN caches.
 - `scripts/snellius_tabpfn_a100.sbatch`: final self-contained batch script for one A100 GPU job.
+- `scripts/submit_snellius_rt_only.sh`: one-command submit/watch wrapper for official RT-only runs (auto-checks RT preprocessed files, auto-detects Rust module, uses `sbatch --parsable`).
 
 Suggested flow on a Snellius login node:
 
