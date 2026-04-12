@@ -83,6 +83,7 @@ The simplest Snellius workflow is:
 
 - `scripts/setup_snellius_env.sh`: create a project venv and warm the RelBench / TabPFN caches.
 - `scripts/snellius_tabpfn_a100.sbatch`: final self-contained batch script for one A100 GPU job.
+- `scripts/submit_snellius_tabular.sh`: one-command submit/watch wrapper for tabular runs (TabICL/TabPFN/XGBoost) with reliable `MODELS` export.
 - `scripts/submit_snellius_rt_only.sh`: one-command submit/watch wrapper for official RT-only runs (auto-checks RT preprocessed files, auto-detects Rust module, uses `sbatch --parsable`).
 
 Suggested flow on a Snellius login node:
@@ -96,23 +97,25 @@ module load Python/3.12.3-GCCcore-13.3.0
 ./scripts/setup_snellius_env.sh
 ```
 
-Submit a TabPFN run:
+Submit a TabICL run:
 
 ```bash
-sbatch scripts/snellius_tabpfn_a100.sbatch
+MODELS=tabicl WATCH_LOG=1 ./scripts/submit_snellius_tabular.sh
 ```
 
 Watch the job:
 
 ```bash
 squeue -u $USER
-tail -f slurm-cb-tabpfn-<jobid>.out
+tail -F slurm-cb-tabfm-<jobid>.out
 ```
 
 Notes:
 
 - The batch script follows SURF's "Final job script" pattern directly: `#SBATCH` header, load modules, use `$TMPDIR` for scratch output, run Python, then copy results back.
 - Defaults are embedded in the job script: dataset `rel-f1`, task `driver-top3`, model `tabpfn`, seed `7`, device `cuda`.
+- For direct `sbatch` submits, pass explicit exports to avoid model drift due site-level export policy, e.g.:
+  `sbatch --export=ALL,MODELS=tabicl,DATASET_NAME=rel-f1,TASK_NAME=driver-top3,SEED=7 scripts/snellius_tabpfn_a100.sbatch`.
 - The batch script also enables `--tabpfn-ignore-pretraining-limits` by default because this benchmark can exceed TabPFN's nominal 500-feature limit after preprocessing.
 - Results are copied to `outputs/snellius/<jobid>` in the repo after the job finishes.
 - If you skip `./scripts/setup_snellius_env.sh`, edit `DOWNLOAD_ARTIFACTS=1` near the top of the batch script before submitting.

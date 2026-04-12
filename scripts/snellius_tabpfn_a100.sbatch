@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Set job requirements
-#SBATCH -J cb-tabpfn
+#SBATCH -J cb-tabfm
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH --cpus-per-task=18
@@ -9,6 +9,7 @@
 #SBATCH -p gpu_a100
 #SBATCH -t 04:00:00
 #SBATCH --output=slurm-%x-%j.out
+#SBATCH --export=ALL
 
 set -euo pipefail
 
@@ -26,7 +27,7 @@ SNELLIUS_PYTHON_MODULE="${SNELLIUS_PYTHON_MODULE:-Python/3.12.3-GCCcore-13.3.0}"
 REPO_ROOT="${REPO_ROOT:-$SLURM_SUBMIT_DIR}"
 CACHE_ROOT="${CACHE_ROOT:-/scratch-shared/$USER/continuumbench-cache}"
 JOB_TMPDIR="${TMPDIR:-/tmp/$USER/$SLURM_JOB_ID}"
-JOB_OUTPUT_DIR="${JOB_TMPDIR}/continuumbench_tabpfn"
+JOB_OUTPUT_DIR="${JOB_TMPDIR}/continuumbench_tabular"
 RESULTS_DIR="${REPO_ROOT}/outputs/snellius/${SLURM_JOB_ID}"
 VENV_DIR="${VENV_DIR:-${REPO_ROOT}/.venv-snellius}"
 
@@ -58,6 +59,39 @@ lowercase() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
 
+validate_models_spec() {
+  local spec="$1"
+  local model=""
+  local valid=""
+  local count=0
+
+  IFS=',' read -r -a models <<< "${spec}"
+  for model in "${models[@]}"; do
+    model="${model//[[:space:]]/}"
+    if [[ -z "${model}" ]]; then
+      continue
+    fi
+    count=$((count + 1))
+    case "$(lowercase "${model}")" in
+      tabicl|tabpfn|xgboost)
+        ;;
+      *)
+        valid="false"
+        ;;
+    esac
+  done
+
+  if [[ "${count}" -eq 0 ]]; then
+    echo "MODELS must contain at least one model from {tabicl,tabpfn,xgboost}." >&2
+    return 1
+  fi
+  if [[ "${valid}" == "false" ]]; then
+    echo "Invalid MODELS='${spec}'. Allowed: tabicl, tabpfn, xgboost." >&2
+    return 1
+  fi
+  return 0
+}
+
 # Create output directory on scratch
 mkdir -p "${JOB_OUTPUT_DIR}" "${RESULTS_DIR}"
 
@@ -86,6 +120,10 @@ case "$(lowercase "${TABPFN_IGNORE_PRETRAINING_LIMITS}")" in
     exit 1
     ;;
 esac
+
+validate_models_spec "${MODELS}"
+echo "=== ContinuumBench tabular run ==="
+echo "job_id=${SLURM_JOB_ID:-unknown} dataset=${DATASET_NAME} task=${TASK_NAME} models=${MODELS} seed=${SEED} device=${DEVICE}"
 
 # Execute the benchmark from the repo and write outputs to scratch
 python "${REPO_ROOT}/continuumbench_tabfm_run.py" \
