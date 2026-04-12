@@ -125,6 +125,71 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
+rustler_has_sampler() {
+  python - <<'PY'
+import importlib
+import sys
+
+try:
+    mod = importlib.import_module("rustler")
+except Exception as exc:
+    print(f"rustler import failed: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+mod_file = getattr(mod, "__file__", None)
+has_sampler = hasattr(mod, "Sampler")
+print(f"rustler module: {mod_file}; has Sampler: {has_sampler}")
+raise SystemExit(0 if has_sampler else 1)
+PY
+}
+
+remove_conflicting_rustler_package() {
+  python - <<'PY'
+import importlib
+import os
+import sys
+
+try:
+    mod = importlib.import_module("rustler")
+except Exception:
+    raise SystemExit(0)
+
+if hasattr(mod, "Sampler"):
+    raise SystemExit(0)
+
+mod_file = getattr(mod, "__file__", "") or ""
+if mod_file.endswith(".py") or mod_file.endswith(".pyc") or "__init__.py" in mod_file:
+    print(f"Detected conflicting python rustler package at: {mod_file}")
+    raise SystemExit(1)
+
+raise SystemExit(0)
+PY
+}
+
+if ! rustler_has_sampler; then
+  if ! remove_conflicting_rustler_package; then
+    echo "Removing conflicting non-extension rustler package from venv..."
+    python -m pip uninstall -y rustler || true
+  fi
+  echo "Building RT rustler extension with maturin (release mode)..."
+  if ! (
+    cd "${RT_REPO_PATH}/rustler" &&
+    python -m maturin develop --release --uv
+  ); then
+    echo "maturin develop failed; falling back to pip editable install..."
+    (
+      cd "${RT_REPO_PATH}/rustler" &&
+      python -m pip install -e .
+    )
+  fi
+fi
+
+if ! rustler_has_sampler; then
+  echo "rustler extension is still unavailable (Sampler missing)." >&2
+  echo "Check build logs above for Rust/maturin errors." >&2
+  exit 1
+fi
+
 # Fail fast if RT import path is still broken.
 python - <<'PY'
 import os
