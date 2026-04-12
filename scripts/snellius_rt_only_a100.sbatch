@@ -26,6 +26,7 @@ DOWNLOAD_ARTIFACTS="${DOWNLOAD_ARTIFACTS:-0}"
 MODELS="${MODELS:-tabpfn}" # Ignored by --relational-only except as folder key.
 SNELLIUS_STACK_MODULE="${SNELLIUS_STACK_MODULE:-2024}"
 SNELLIUS_PYTHON_MODULE="${SNELLIUS_PYTHON_MODULE:-Python/3.12.3-GCCcore-13.3.0}"
+SNELLIUS_RUST_MODULE="${SNELLIUS_RUST_MODULE:-}"
 
 REPO_ROOT="${REPO_ROOT:-$SLURM_SUBMIT_DIR}"
 RT_REPO_PATH="${RT_REPO_PATH:-${REPO_ROOT}/relational-transformer}"
@@ -34,11 +35,26 @@ JOB_TMPDIR="${TMPDIR:-/tmp/$USER/$SLURM_JOB_ID}"
 JOB_OUTPUT_DIR="${JOB_TMPDIR}/continuumbench_rt_only"
 RESULTS_DIR="${REPO_ROOT}/outputs/snellius/${SLURM_JOB_ID}"
 VENV_DIR="${VENV_DIR:-${REPO_ROOT}/.venv-snellius}"
+RT_PREPROCESSED_ROOT="${RT_PREPROCESSED_ROOT:-${HOME}/scratch/pre}"
 
 # Loading modules
 module purge
 module load "${SNELLIUS_STACK_MODULE}"
 module load "${SNELLIUS_PYTHON_MODULE}"
+
+if ! command -v rustc >/dev/null 2>&1; then
+  if [[ -n "${SNELLIUS_RUST_MODULE}" ]]; then
+    module load "${SNELLIUS_RUST_MODULE}"
+  else
+    autodetected_rust_module="$(
+      module -t avail Rust 2>&1 | awk '/^Rust\/[^ ]+$/ {print; exit}'
+    )"
+    if [[ -n "${autodetected_rust_module}" ]]; then
+      echo "Autoloading Rust module: ${autodetected_rust_module}"
+      module load "${autodetected_rust_module}" || true
+    fi
+  fi
+fi
 
 cd "${REPO_ROOT}"
 
@@ -51,6 +67,15 @@ fi
 if [[ ! -f "${RT_REPO_PATH}/rt/main.py" ]]; then
   echo "Missing official RT checkout at ${RT_REPO_PATH}" >&2
   echo "Set RT_REPO_PATH=/path/to/relational-transformer (must contain rt/main.py)." >&2
+  exit 1
+fi
+
+if [[ ! -f "${RT_PREPROCESSED_ROOT}/${DATASET_NAME}/table_info.json" ]] || [[ ! -f "${RT_PREPROCESSED_ROOT}/${DATASET_NAME}/column_index.json" ]]; then
+  echo "Missing RT preprocessed artifacts for dataset '${DATASET_NAME}'." >&2
+  echo "Expected files:" >&2
+  echo "  ${RT_PREPROCESSED_ROOT}/${DATASET_NAME}/table_info.json" >&2
+  echo "  ${RT_PREPROCESSED_ROOT}/${DATASET_NAME}/column_index.json" >&2
+  echo "Prepare/download RT preprocessed data (see relational-transformer README: Data Preparation / Download Preprocessed Data)." >&2
   exit 1
 fi
 
@@ -89,7 +114,14 @@ ensure_python_module "uv" "uv"
 
 if ! command -v rustc >/dev/null 2>&1; then
   echo "Missing rustc in PATH. Official RT requires Rust to build rustler." >&2
-  echo "Load a Rust toolchain module before submitting (e.g. check 'module avail Rust')." >&2
+  echo "Set SNELLIUS_RUST_MODULE=<Rust/...> when submitting, e.g. after checking:" >&2
+  echo "  module -t avail Rust" >&2
+  module -t avail Rust 2>&1 | sed -n '1,40p' >&2 || true
+  exit 1
+fi
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "Missing cargo in PATH. Official RT requires Rust tooling (cargo)." >&2
   exit 1
 fi
 
@@ -107,6 +139,10 @@ import rt.data  # noqa: F401
 
 print("RT import preflight passed.")
 PY
+
+# Avoid interactive wandb prompts on cluster jobs.
+export WANDB_MODE="${WANDB_MODE:-disabled}"
+export WANDB_SILENT="${WANDB_SILENT:-true}"
 
 lowercase() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
