@@ -122,13 +122,71 @@ if ! command -v rustc >/dev/null 2>&1; then
   echo "Set SNELLIUS_RUST_MODULE=<Rust/...> when submitting, e.g. after checking:" >&2
   echo "  module -t avail Rust" >&2
   module -t avail Rust 2>&1 | sed -n '1,40p' >&2 || true
-  exit 1
 fi
 
 if ! command -v cargo >/dev/null 2>&1; then
   echo "Missing cargo in PATH. Official RT requires Rust tooling (cargo)." >&2
-  exit 1
 fi
+
+# ---------------------------------------------------------------------------
+# Rust version check: rkyv >= 0.8 requires rustc >= 1.81.
+# Snellius 2024 module stack caps at Rust 1.78.  Fall back to the rustup-
+# managed stable toolchain cached in the repo by setup_snellius_env.sh.
+# ---------------------------------------------------------------------------
+_RUSTUP_CACHE_HOME="${REPO_ROOT}/.rustup"
+_CARGO_CACHE_HOME="${REPO_ROOT}/.cargo"
+_NEED_RUSTC_MINOR=81
+
+_rustc_minor() {
+  rustc --version 2>/dev/null | awk '{print $2}' | cut -d. -f2
+}
+
+_ensure_rustc_min_version() {
+  local cur_minor
+  cur_minor="$(_rustc_minor 2>/dev/null || echo '0')"
+
+  if [[ "${cur_minor}" -ge "${_NEED_RUSTC_MINOR}" ]]; then
+    echo "rustc $(rustc --version | awk '{print $2}') >= 1.${_NEED_RUSTC_MINOR} — OK"
+    return 0
+  fi
+
+  local cur_ver
+  cur_ver="$(rustc --version 2>/dev/null || echo 'none')"
+  echo "rustc ${cur_ver} < 1.${_NEED_RUSTC_MINOR}; falling back to rustup cache..."
+
+  if [[ -x "${_CARGO_CACHE_HOME}/bin/rustc" ]]; then
+    export RUSTUP_HOME="${_RUSTUP_CACHE_HOME}"
+    export CARGO_HOME="${_CARGO_CACHE_HOME}"
+    export PATH="${_CARGO_CACHE_HOME}/bin:${PATH}"
+    local new_minor
+    new_minor="$(_rustc_minor)"
+    if [[ "${new_minor}" -ge "${_NEED_RUSTC_MINOR}" ]]; then
+      echo "Using rustup rustc: $(rustc --version)"
+      return 0
+    fi
+    echo "Cached rustup toolchain is also too old: $(rustc --version)" >&2
+  fi
+
+  cat >&2 <<RUSTUP_ERR
+
+ERROR: rustc >= 1.${_NEED_RUSTC_MINOR} is required to build the RT rustler extension
+       (rkyv >= 0.8 in rustler/Cargo.lock).
+
+The Snellius module '${SNELLIUS_RUST_MODULE}' provides rustc ${cur_ver}, which is too old,
+and no compatible cached toolchain was found at ${_CARGO_CACHE_HOME}/bin.
+
+Fix: run setup_snellius_env.sh once on a login node (internet required):
+  cd ${REPO_ROOT}
+  ./scripts/setup_snellius_env.sh
+
+This installs a stable rustup toolchain into .rustup / .cargo inside the repo.
+Compute nodes will use it automatically on the next submission.
+
+RUSTUP_ERR
+  return 1
+}
+
+_ensure_rustc_min_version
 
 echo "Rust toolchain:"
 rustc --version

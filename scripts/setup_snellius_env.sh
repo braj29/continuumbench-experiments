@@ -97,5 +97,35 @@ if enabled("WARMUP_TABPFN"):
     clf.fit(X, y)
 PY
 
+# ---------------------------------------------------------------------------
+# Rust toolchain for the RT rustler extension
+# ---------------------------------------------------------------------------
+# rkyv >= 0.8 (required by rustler/Cargo.lock) requires rustc >= 1.81.
+# Snellius 2024 module stack caps at Rust 1.78, so we cache a rustup-managed
+# stable toolchain inside the repo directory.  Compute nodes have no internet
+# access, so the toolchain must be pre-installed here on the login node.
+RUSTUP_HOME="${RUSTUP_HOME:-${REPO_ROOT}/.rustup}"
+CARGO_HOME="${CARGO_HOME:-${REPO_ROOT}/.cargo}"
+
+_rustup_min_minor=81   # rustc >= 1.81 required for rkyv 0.8
+
+_cached_rustc_ok() {
+  local ver minor
+  ver="$("${CARGO_HOME}/bin/rustc" --version 2>/dev/null | awk '{print $2}' || echo '0.0.0')"
+  minor="$(printf '%s' "${ver}" | cut -d. -f2)"
+  [[ "${minor}" -ge "${_rustup_min_minor}" ]]
+}
+
+if _cached_rustc_ok; then
+  echo "Rust toolchain already cached at ${CARGO_HOME}/bin: $("${CARGO_HOME}/bin/rustc" --version)"
+else
+  echo "Installing stable Rust via rustup (cached at ${CARGO_HOME})..."
+  echo "This requires internet access — run on a Snellius login node."
+  export RUSTUP_HOME CARGO_HOME
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --no-modify-path --default-toolchain stable
+  echo "Installed: $("${CARGO_HOME}/bin/rustc" --version)"
+fi
+
 echo "Snellius environment is ready in ${VENV_DIR}"
 echo "Activate it with: source ${VENV_DIR}/bin/activate"

@@ -11,3 +11,6 @@ artifacts/
 outputs/
 graphbench_data/
 cache/
+# rustup-managed Rust toolchain (installed by setup_snellius_env.sh)
+.rustup/
+.cargo/
