@@ -258,10 +258,33 @@ class OfficialRelationalTransformerAdapter(BaseViewModel):
         if result.returncode != 0:
             tail = "\n".join(logs.splitlines()[-120:])
             dependency_hint = ""
-            if "ModuleNotFoundError: No module named 'wandb'" in logs:
+            missing_module_to_package = {
+                "wandb": "wandb",
+                "maturin_import_hook": "maturin-import-hook",
+                "maturin": "maturin[patchelf]",
+                "strictfire": "strictfire",
+                "orjson": "orjson",
+                "ml_dtypes": "ml-dtypes",
+                "einops": "einops",
+                "sentence_transformers": "sentence-transformers",
+            }
+            missing_packages = []
+            for module_name, package_name in missing_module_to_package.items():
+                marker = f"ModuleNotFoundError: No module named '{module_name}'"
+                if marker in logs:
+                    missing_packages.append(package_name)
+
+            if missing_packages:
+                unique_packages = ", ".join(sorted(set(missing_packages)))
                 dependency_hint = (
-                    "\nHint: install RT runtime dependency in the same python env, e.g. "
-                    "`python -m pip install wandb`."
+                    "\nHint: install missing RT runtime dependencies in the same python env, e.g. "
+                    f"`python -m pip install --upgrade {unique_packages}`."
+                )
+            elif "ModuleNotFoundError: No module named 'rustler'" in logs:
+                dependency_hint = (
+                    "\nHint: RT's rust sampler extension is missing. "
+                    "Install/build it in the RT environment (requires Rust toolchain), e.g. "
+                    "`python -m pip install -e <rt_repo_path>/rustler`."
                 )
             raise RuntimeError(
                 "Official RT run failed. "

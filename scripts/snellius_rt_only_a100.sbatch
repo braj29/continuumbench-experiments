@@ -64,12 +64,49 @@ export HF_HOME="${HF_HOME:-${CACHE_ROOT}/huggingface}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-${SLURM_CPUS_PER_TASK:-1}}"
 export MKL_NUM_THREADS="${MKL_NUM_THREADS:-${SLURM_CPUS_PER_TASK:-1}}"
 export PYTHONUNBUFFERED=1
+export RT_REPO_PATH
 
-# RT runtime requires wandb import from rt/main.py.
-if ! python -c "import wandb" >/dev/null 2>&1; then
-  echo "Installing missing RT dependency: wandb"
-  python -m pip install --upgrade wandb
+ensure_python_module() {
+  local module_name="$1"
+  local package_name="$2"
+  if ! python -c "import ${module_name}" >/dev/null 2>&1; then
+    echo "Installing missing RT dependency: ${package_name} (import ${module_name})"
+    python -m pip install --upgrade "${package_name}"
+  fi
+}
+
+# Core RT runtime deps imported by rt/main.py and rt/data.py.
+ensure_python_module "wandb" "wandb"
+ensure_python_module "strictfire" "strictfire"
+ensure_python_module "maturin_import_hook" "maturin-import-hook"
+ensure_python_module "maturin" "maturin[patchelf]"
+ensure_python_module "ml_dtypes" "ml-dtypes"
+ensure_python_module "orjson" "orjson"
+ensure_python_module "einops" "einops"
+ensure_python_module "sentence_transformers" "sentence-transformers"
+ensure_python_module "polars" "polars"
+ensure_python_module "uv" "uv"
+
+if ! command -v rustc >/dev/null 2>&1; then
+  echo "Missing rustc in PATH. Official RT requires Rust to build rustler." >&2
+  echo "Load a Rust toolchain module before submitting (e.g. check 'module avail Rust')." >&2
+  exit 1
 fi
+
+# Fail fast if RT import path is still broken.
+python - <<'PY'
+import os
+import sys
+
+repo = os.environ["RT_REPO_PATH"]
+if repo not in sys.path:
+    sys.path.insert(0, repo)
+
+import rt.main  # noqa: F401
+import rt.data  # noqa: F401
+
+print("RT import preflight passed.")
+PY
 
 lowercase() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
