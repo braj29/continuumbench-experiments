@@ -134,6 +134,25 @@ echo "Rust toolchain:"
 rustc --version
 cargo --version
 
+edition_fix_if_needed() {
+  local cargo_toml="${RT_REPO_PATH}/rustler/Cargo.toml"
+  local cargo_ver
+  cargo_ver="$(cargo --version | awk '{print $2}')"
+  local cargo_major cargo_minor
+  cargo_major="$(printf '%s' "${cargo_ver}" | cut -d. -f1)"
+  cargo_minor="$(printf '%s' "${cargo_ver}" | cut -d. -f2)"
+
+  # edition2024 is stabilized in newer cargo/rust toolchains.
+  if [[ "${cargo_major}" -eq 1 && "${cargo_minor}" -lt 85 ]]; then
+    if grep -q 'edition = "2024"' "${cargo_toml}"; then
+      echo "Detected cargo ${cargo_ver} (<1.85): patching rustler edition 2024 -> 2021 for compatibility."
+      sed -i 's/edition = "2024"/edition = "2021"/' "${cargo_toml}"
+    fi
+  fi
+}
+
+edition_fix_if_needed
+
 rustler_has_sampler() {
   python - <<'PY'
 import importlib
