@@ -18,6 +18,13 @@ SNELLIUS_RUST_MODULE="${SNELLIUS_RUST_MODULE:-}"
 
 WATCH_LOG="${WATCH_LOG:-1}"
 
+detect_latest_rust_module() {
+  module -t avail Rust 2>&1 \
+    | awk '/^Rust\/[0-9]/{print}' \
+    | sort -t'/' -k2,2V \
+    | tail -n1
+}
+
 if ! command -v module >/dev/null 2>&1; then
   echo "Environment module command is unavailable. Run this on a Snellius login node." >&2
   exit 1
@@ -62,9 +69,7 @@ if [[ ! -f "${table_info_path}" || ! -f "${column_index_path}" ]]; then
 fi
 
 if [[ -z "${SNELLIUS_RUST_MODULE}" ]]; then
-  SNELLIUS_RUST_MODULE="$(
-    module -t avail Rust 2>&1 | awk '/^Rust\/[^ ]+$/ {print; exit}'
-  )"
+  SNELLIUS_RUST_MODULE="$(detect_latest_rust_module)"
 fi
 
 if [[ -z "${SNELLIUS_RUST_MODULE}" ]]; then

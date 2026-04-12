@@ -37,6 +37,13 @@ RESULTS_DIR="${REPO_ROOT}/outputs/snellius/${SLURM_JOB_ID}"
 VENV_DIR="${VENV_DIR:-${REPO_ROOT}/.venv-snellius}"
 RT_PREPROCESSED_ROOT="${RT_PREPROCESSED_ROOT:-${HOME}/scratch/pre}"
 
+detect_latest_rust_module() {
+  module -t avail Rust 2>&1 \
+    | awk '/^Rust\/[0-9]/{print}' \
+    | sort -t'/' -k2,2V \
+    | tail -n1
+}
+
 # Loading modules
 module purge
 module load "${SNELLIUS_STACK_MODULE}"
@@ -46,9 +53,7 @@ if ! command -v rustc >/dev/null 2>&1; then
   if [[ -n "${SNELLIUS_RUST_MODULE}" ]]; then
     module load "${SNELLIUS_RUST_MODULE}"
   else
-    autodetected_rust_module="$(
-      module -t avail Rust 2>&1 | awk '/^Rust\/[^ ]+$/ {print; exit}'
-    )"
+    autodetected_rust_module="$(detect_latest_rust_module)"
     if [[ -n "${autodetected_rust_module}" ]]; then
       echo "Autoloading Rust module: ${autodetected_rust_module}"
       module load "${autodetected_rust_module}" || true
@@ -125,6 +130,10 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
+echo "Rust toolchain:"
+rustc --version
+cargo --version
+
 rustler_has_sampler() {
   python - <<'PY'
 import importlib
@@ -141,6 +150,27 @@ has_sampler = hasattr(mod, "Sampler")
 print(f"rustler module: {mod_file}; has Sampler: {has_sampler}")
 raise SystemExit(0 if has_sampler else 1)
 PY
+}
+
+build_rustler_extension() {
+  local manifest_path="${RT_REPO_PATH}/rustler/Cargo.toml"
+  echo "Building RT rustler extension with maturin (release mode, --uv)..."
+  if (
+    cd "${RT_REPO_PATH}/rustler" &&
+    python -m maturin develop --release --uv --manifest-path "${manifest_path}"
+  ); then
+    return 0
+  fi
+
+  echo "maturin --uv build failed; retrying without --uv..."
+  if (
+    cd "${RT_REPO_PATH}/rustler" &&
+    python -m maturin develop --release --manifest-path "${manifest_path}"
+  ); then
+    return 0
+  fi
+
+  return 1
 }
 
 remove_conflicting_rustler_package() {
@@ -171,16 +201,15 @@ if ! rustler_has_sampler; then
     echo "Removing conflicting non-extension rustler package from venv..."
     python -m pip uninstall -y rustler || true
   fi
-  echo "Building RT rustler extension with maturin (release mode)..."
-  if ! (
-    cd "${RT_REPO_PATH}/rustler" &&
-    python -m maturin develop --release --uv
-  ); then
-    echo "maturin develop failed; falling back to pip editable install..."
-    (
-      cd "${RT_REPO_PATH}/rustler" &&
-      python -m pip install -e .
-    )
+  if ! build_rustler_extension; then
+    echo "Failed to build rustler extension with maturin." >&2
+    echo "Diagnostics:" >&2
+    python -m maturin --version >&2 || true
+    rustc --version >&2 || true
+    cargo --version >&2 || true
+    echo "Hint: this often means the loaded Rust module is too old for edition 2024." >&2
+    echo "Try a newer module via SNELLIUS_RUST_MODULE (check: module -t avail Rust)." >&2
+    exit 1
   fi
 fi
 
