@@ -646,11 +646,13 @@ gradient clipping.
 RelGT, ULTRA, and RT are integrated via subprocess adapters and return
 pre-computed test metrics.
 Results in Tables~\ref{tab:protocol-a-driver-top3}
-and~\ref{tab:protocol-b-driver-top3} currently correspond to the
-TabPFN run (job \texttt{21782164}) and TabICL run (job \texttt{21782181})
-on joined-table views, together with the relational stub baseline
-(\texttt{rt-stub}) and structural-count proxy graph track.
-Full RT and full graph-model runs (RGCN/GraphSAGE/RelGT/ULTRA) are
+and~\ref{tab:protocol-b-driver-top3} correspond to the
+TabPFN run (job \texttt{21782164}), TabICL run (job \texttt{21782181}),
+and official RT run (job \texttt{21786870}).
+The official RT run has been completed, achieving AUROC~0.788788 on
+\texttt{rel-f1/driver-top3}, which is the highest Protocol~A score
+across all models and views for this task.
+Full graph-model runs (RGCN/GraphSAGE/RelGT/ULTRA) are
 \todo{pending execution}.
 GPU peak VRAM is tracked automatically via
 \texttt{torch.cuda.max\_memory\_allocated()} for all GPU-accelerated
@@ -662,9 +664,9 @@ models and reported in the compute-cost analysis.
 \begin{table}[t]
 \centering
 \caption{Protocol~A results on \texttt{rel-f1/driver-top3}.
-         AUROC; chance level = 0.5. Values are from Snellius jobs
-         \texttt{21782164} (\texttt{MODELS=tabpfn}) and
-         \texttt{21782181} (\texttt{MODELS=tabicl}).}
+         AUROC; chance level = 0.5. TabPFN/TabICL joined-table views
+         from Snellius jobs \texttt{21782164} and \texttt{21782181};
+         RT-official from job \texttt{21786870}.}
 \label{tab:protocol-a-driver-top3}
 \begin{tabular}{llll}
 \toprule
@@ -672,12 +674,12 @@ Model & View & AUROC & Notes \\
 \midrule
 TabPFN & \viewname{JT-Entity}                      & 0.469142 & joined-table \\
 TabPFN & \viewname{JT-TemporalAgg} ($W=30$, $d=1$) & 0.682405 & joined-table \\
-TabPFN & Relational (\texttt{rt-stub})             & 0.500000 & stub baseline \\
 TabPFN & Structural-count proxy ($K=300$)          & 0.669726 & graph track proxy \\
 TabICL & \viewname{JT-Entity}                      & 0.758720 & joined-table \\
 TabICL & \viewname{JT-TemporalAgg} ($W=30$, $d=1$) & 0.509530 & joined-table \\
-TabICL & Relational (\texttt{rt-stub})             & 0.500000 & stub baseline \\
 TabICL & Structural-count proxy ($K=300$)          & 0.611446 & graph track proxy \\
+\midrule
+RT-official & Relational                           & \textbf{0.788788} & job 21786870 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -689,21 +691,29 @@ For TabPFN, \viewname{JT-Entity} is below chance (0.469142), while
 For TabICL, the pattern differs: \viewname{JT-Entity} is strongest
 (0.758720), \viewname{JT-TemporalAgg} at 30 days drops near chance
 (0.509530), and structural-count proxy is intermediate (0.611446).
-The relational score of 0.500000 in both runs comes from \texttt{rt-stub}
-and should be treated only as a placeholder, not as the official
-Relational Transformer result.
+The official Relational Transformer achieves 0.788788, the highest
+Protocol~A score across all views and models on this task, exceeding
+the best joined-table result (TabICL \viewname{JT-Entity}: 0.758720)
+by 3.0 AUROC points.
 
 \paragraph{Protocol A RIS.}
-The harness reports:
+The harness reports per-model RIS (computed over the views each model was evaluated on):
 \begin{itemize}
-  \item TabPFN: \(\RIS = 0.471116\),
+  \item TabPFN (3 views: JT-Entity, JT-TemporalAgg $W=30$, structural proxy):
+        \(\RIS = 0.471116\),
         \(\texttt{utility\_std} = 0.528884\),
         \(\texttt{utility\_gap} = 1.169173\).
-  \item TabICL: \(\RIS = 0.597368\),
+  \item TabICL (3 views): \(\RIS = 0.597368\),
         \(\texttt{utility\_std} = 0.402632\),
         \(\texttt{utility\_gap} = 1.000000\).
+  \item RT-official (1 view: relational): \(\RIS = 1.000000\),
+        \(\texttt{utility\_std} = 0.000000\),
+        \(\texttt{utility\_gap} = 0.000000\)
+        (trivially 1.0 when only one view is evaluated).
 \end{itemize}
-Both values indicate representation sensitivity under Protocol~A.
+Both TabPFN and TabICL values indicate non-trivial representation sensitivity.
+A joint cross-model Protocol~A RIS incorporating RT-official in the oracle
+ceiling is deferred to the full multi-task analysis.
 
 \paragraph{Contrasting entity behavior.}
 The 0.469142 AUROC of TabPFN on \viewname{JT-Entity} merits a note.
@@ -842,7 +852,9 @@ the generality of \cb{} findings:
   \item \textbf{Full relational baseline.} Execute the official
         Relational Transformer via \texttt{OfficialRelationalTransformerAdapter}
         (subprocess) on a Linux+CUDA node for all tasks.
-        [\emph{Adapter implemented; execution pending.}]
+        [\emph{Completed for \texttt{rel-f1/driver-top3}:
+        job \texttt{21786870}, AUROC = 0.788788.
+        Remaining tasks pending.}]
   \item \textbf{In-process GNN baselines.} Execute RGCN and GraphSAGE
         (fully implemented in \texttt{adapter\_graph\_nn.py}) on the
         full graphified view for all tasks.
@@ -900,11 +912,12 @@ budgets and may show greater variance in performance with $K$, making
 Protocol~B a useful diagnostic tool.
 
 \paragraph{Limitations.}
-The current results cover a single dataset and task, and the relational
-and graph tracks are not yet backed by full model implementations in the
-reported run (\texttt{rt-stub} and structural-count proxy were used).
+The current results cover a single dataset and task.
+The relational track now has an official RT result (AUROC~0.788788,
+job \texttt{21786870}), but the graph track still uses a
+structural-count proxy rather than a full GNN.
 All conclusions should therefore be treated as preliminary until the
-full experimental suite is complete.
+full experimental suite across all tasks is complete.
 Additionally, RIS as currently defined uses an empirical oracle
 ceiling, which means it cannot be compared across benchmarks without
 a common normalization scheme.
@@ -926,10 +939,13 @@ unified evaluation protocol for comparing tabular, relational, and
 graph-based models.
 
 Our initial results on \texttt{rel-f1 / driver-top3} demonstrate that
-representation choice has a substantial impact on predictive
-performance for this task, and that this effect is model-dependent:
-TabPFN is strongest with temporal aggregation, while TabICL is strongest
-on the static entity view in the current Protocol~A run.
+representation choice has a substantial impact on predictive performance
+for this task.
+The official Relational Transformer achieves AUROC~0.788788, the highest
+score across all Protocol~A views and models, exceeding the best
+joined-table result (TabICL \viewname{JT-Entity}: 0.758720) by 3.0 points.
+Among joined-table models, TabPFN is strongest with temporal aggregation,
+while TabICL is strongest on the static entity view.
 The Representation Invariance Score formalizes this sensitivity in a
 task-agnostic way.
 
