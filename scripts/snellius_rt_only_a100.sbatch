@@ -75,15 +75,6 @@ if [[ ! -f "${RT_REPO_PATH}/rt/main.py" ]]; then
   exit 1
 fi
 
-if [[ ! -f "${RT_PREPROCESSED_ROOT}/${DATASET_NAME}/table_info.json" ]] || [[ ! -f "${RT_PREPROCESSED_ROOT}/${DATASET_NAME}/column_index.json" ]]; then
-  echo "Missing RT preprocessed artifacts for dataset '${DATASET_NAME}'." >&2
-  echo "Expected files:" >&2
-  echo "  ${RT_PREPROCESSED_ROOT}/${DATASET_NAME}/table_info.json" >&2
-  echo "  ${RT_PREPROCESSED_ROOT}/${DATASET_NAME}/column_index.json" >&2
-  echo "Prepare/download RT preprocessed data (see relational-transformer README: Data Preparation / Download Preprocessed Data)." >&2
-  exit 1
-fi
-
 # shellcheck disable=SC1090
 source "${VENV_DIR}/bin/activate"
 
@@ -347,9 +338,11 @@ PY
 RUSTLER_BIN="${RT_REPO_PATH}/rustler/target/release/rustler"
 
 rt_rkyv_files_exist() {
-  [[ -f "${RT_PRE_DIR}/nodes.rkyv"   ]] \
-  && [[ -f "${RT_PRE_DIR}/offsets.rkyv" ]] \
-  && [[ -f "${RT_PRE_DIR}/p2f_adj.rkyv" ]]
+  [[ -f "${RT_PRE_DIR}/nodes.rkyv"      ]] \
+  && [[ -f "${RT_PRE_DIR}/offsets.rkyv"    ]] \
+  && [[ -f "${RT_PRE_DIR}/p2f_adj.rkyv"   ]] \
+  && [[ -f "${RT_PRE_DIR}/table_info.json" ]] \
+  && [[ -f "${RT_PRE_DIR}/column_index.json" ]]
 }
 
 if rt_rkyv_files_exist; then
