@@ -14,6 +14,7 @@ DATASET_NAME="${DATASET_NAME:-rel-f1}"
 TASK_NAME="${TASK_NAME:-driver-top3}"
 WARMUP_DATASET="${WARMUP_DATASET:-1}"
 WARMUP_TABPFN="${WARMUP_TABPFN:-1}"
+RECREATE_VENV="${RECREATE_VENV:-0}"
 
 if command -v module >/dev/null 2>&1; then
   if [[ -n "${SNELLIUS_STACK_MODULE}" ]]; then
@@ -44,7 +45,21 @@ mkdir -p \
   "${PIP_CACHE_DIR}" \
   "${HF_HOME}"
 
-"${PYTHON_BIN}" -m venv --copies "${VENV_DIR}"
+if [[ -e "${VENV_DIR}" && ! -d "${VENV_DIR}" ]]; then
+  echo "VENV_DIR exists but is not a directory: ${VENV_DIR}" >&2
+  exit 1
+fi
+
+if [[ "${RECREATE_VENV}" == "1" && -d "${VENV_DIR}" ]]; then
+  rm -rf "${VENV_DIR}"
+fi
+
+if [[ ! -f "${VENV_DIR}/bin/activate" ]]; then
+  "${PYTHON_BIN}" -m venv --copies "${VENV_DIR}"
+else
+  echo "Reusing virtual environment at ${VENV_DIR}"
+fi
+
 # shellcheck disable=SC1090
 source "${VENV_DIR}/bin/activate"
 
