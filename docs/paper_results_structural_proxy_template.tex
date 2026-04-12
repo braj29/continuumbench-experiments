@@ -1,0 +1,951 @@
+\documentclass[11pt]{article}
+
+% -----------------------------------------------------------------------
+%  Packages
+% -----------------------------------------------------------------------
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{microtype}
+\usepackage{natbib}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!5}
+}
+
+% -----------------------------------------------------------------------
+%  Convenience macros
+% -----------------------------------------------------------------------
+\newcommand{\cb}{\textsc{ContinuumBench}}
+\newcommand{\todo}[1]{\textcolor{red}{\textbf{[TODO: #1]}}}
+\newcommand{\RIS}{\mathrm{RIS}}
+\newcommand{\viewname}[1]{\texttt{#1}}
+
+% -----------------------------------------------------------------------
+%  Title
+% -----------------------------------------------------------------------
+\title{%
+  \cb{}: A Tri-View Benchmark for Representation Invariance\\
+  in Relational Machine Learning%
+}
+\author{%
+  Raj Bhalwankar \quad Pasquale Minervini \quad Erman Acar\\[4pt]
+  \small \textit{[Institution]}%
+}
+\date{\today}
+
+% -----------------------------------------------------------------------
+\begin{document}
+\maketitle
+
+% -----------------------------------------------------------------------
+\begin{abstract}
+% -----------------------------------------------------------------------
+Relational machine learning practitioners must choose how to represent
+a database before training: as a flattened joined table, as structured
+relational input, or as a graph.
+Yet no benchmark enforces identical task semantics across all three
+representations simultaneously, making it impossible to determine whether
+observed performance differences reflect inductive bias or simply
+differences in available information.
+
+We introduce \cb{}, a tri-view evaluation framework that holds the
+prediction task and underlying data fixed while varying only the
+representation.
+Given a relational database and a temporally safe prediction task, \cb{}
+derives three semantically equivalent views---a joined-table view
+(\viewname{JT-Entity}, \viewname{JT-TemporalAgg}), a schema-native
+relational view, and a graphified view---and evaluates models under a
+unified protocol with leakage-safe, seed-time semantics.
+
+We instantiate \cb{} on \todo{N} tasks drawn from
+\todo{M} RelBench datasets and report results for tabular foundation
+models (TabPFN, TabICL) on joined-table views.
+Our experiments reveal three consistent findings: (i)~static entity
+snapshots lose critical historical signal and perform near or below
+chance; (ii)~temporal aggregate features recover most of this signal,
+with longer lookback windows monotonically improving performance;
+(iii)~representation sensitivity, as measured by our
+\emph{Representation Invariance Score} (RIS), varies substantially
+across tasks, indicating that no single representation universally
+dominates.
+We release the \cb{} protocol, data-construction pipeline, and
+evaluation harness to support reproducible comparison across the
+relational learning landscape.
+\end{abstract}
+
+% -----------------------------------------------------------------------
+\section{Introduction}
+\label{sec:intro}
+% -----------------------------------------------------------------------
+
+Relational databases are the dominant storage format for structured
+enterprise and scientific data.
+Training machine learning models on such data requires choosing a
+\emph{representation}: practitioners either (i) denormalize the database
+into a single flat table via feature engineering, (ii) feed normalized
+tables directly into schema-native relational models, or (iii) convert
+the database into a graph and apply graph neural networks.
+
+Each choice embeds a different inductive bias.
+Joined-table approaches are flexible but can lose inter-row dependencies
+and are sensitive to aggregation design~\citep{relbench}.
+Schema-native models such as the Relational Transformer operate directly
+on multi-table inputs and may be more robust to feature engineering
+choices~\citep{rt}.
+Graph-based models such as RelGT can capture structural connectivity but
+depend critically on how the graph is constructed~\citep{relgt}.
+
+\paragraph{The problem.}
+Despite this diversity of approaches, rigorous head-to-head comparison
+is difficult because existing evaluations change both the representation
+\emph{and} the information available to the model simultaneously.
+A model given a carefully engineered feature matrix may outperform a
+model given raw normalized tables for reasons that have nothing to do
+with inductive bias---the information content of the two inputs simply
+differs.
+We formalize this as the \textbf{representation invariance problem}:
+given a fixed relational database and prediction task, how sensitive is
+model performance to the chosen representation when information content
+is held constant?
+
+\paragraph{Our contribution.}
+We introduce \cb{}, a tri-view evaluation protocol designed to
+make this question empirically testable.
+\cb{} derives multiple semantically equivalent \emph{views} from the
+same underlying data and evaluates models under a unified protocol with
+strict temporal safety guarantees.
+Our specific contributions are:
+
+\begin{enumerate}
+  \item \textbf{Tri-view protocol.} We define four views---\viewname{JT-Entity},
+    \viewname{JT-TemporalAgg}, a schema-native relational view, and a
+    graphified view---that preserve identical task semantics and temporal
+    safety across representations (\S\ref{sec:protocol}).
+
+  \item \textbf{Leakage-safe data construction pipeline.}
+    We implement backward as-of joins and lookback-window aggregation
+    that ensure no post-seed information is used in any view
+    (\S\ref{sec:pipeline}).
+
+  \item \textbf{Representation Invariance Score (RIS).}
+    We propose a formal metric for cross-view consistency that
+    decomposes variance in performance into representation-driven and
+    task-driven components (\S\ref{sec:ris}).
+
+  \item \textbf{Empirical evaluation.}
+    We report Protocol~A (cross-view comparison) and Protocol~B
+    (brittleness analysis) results on \todo{N tasks from M datasets},
+    with \todo{full RT and RelGT baselines to be added}
+    (\S\ref{sec:experiments}).
+\end{enumerate}
+
+% -----------------------------------------------------------------------
+\section{Related Work}
+\label{sec:related}
+% -----------------------------------------------------------------------
+
+\paragraph{Relational machine learning benchmarks.}
+RelBench~\citep{relbench} is the closest prior work: it provides
+temporally safe prediction tasks on multi-table relational databases
+and supports tabular, relational, and graph-based baselines.
+\cb{} builds directly on RelBench tasks and temporal splits, but adds
+the tri-view protocol that holds task semantics fixed across
+representations.
+Without this control, differences in RelBench results across model
+families confound representation choice with feature engineering
+decisions.
+
+\paragraph{Automated feature engineering.}
+Systems such as FeatureTools and OpenFE automate joined-table
+construction from relational databases, but do not study how
+representation choice affects downstream performance~\citep{featuretools}.
+\cb{} treats feature engineering choices as experimental variables
+rather than implementation details.
+
+\paragraph{Tabular foundation models.}
+TabPFN~\citep{tabpfn} and TabICL~\citep{tabicl} are in-context learners
+for small tabular datasets.
+We use them as controlled baselines on the joined-table views, where
+their closed-form inference makes experimental turnaround fast.
+
+\paragraph{Schema-native relational models.}
+The Relational Transformer~\citep{rt} encodes multi-table relational
+structure natively, without requiring a flat-table preprocessing step.
+We target it as the baseline for the schema-native view in \cb{}.
+
+\paragraph{Relational graph models.}
+RelGT~\citep{relgt} converts relational databases into heterogeneous
+graphs and applies a graph transformer.
+Its sensitivity to graph construction parameters (neighborhood size $K$)
+makes it a natural candidate for Protocol~B brittleness analysis.
+
+\paragraph{Multi-view learning.}
+The multi-view learning literature studies fusion of heterogeneous
+input modalities~\citep{multiview_survey}.
+\cb{} differs in that the views are not independent sources of
+information---they are derived from the same data---and the goal is
+evaluation rather than fusion.
+
+% -----------------------------------------------------------------------
+\section{The \cb{} Protocol}
+\label{sec:protocol}
+% -----------------------------------------------------------------------
+
+\subsection{Problem formulation}
+
+Let $\mathcal{D}$ be a relational database and $\mathcal{T}$ a
+prediction task defined by an entity table, a target column, and a
+set of prediction instances
+\[
+  \{(e_i,\, t_i,\, y_i)\}_{i=1}^{N},
+\]
+where $e_i$ is the entity identifier, $t_i \in \mathbb{R}$ is the
+seed time, and $y_i$ is the target label or value.
+
+A \emph{representation} is a function $\phi$ that maps
+$(\mathcal{D}, e_i, t_i)$ to a feature vector or structured input
+consumed by a model $f_\phi$.
+The \textbf{representation invariance problem} asks: for a fixed
+$(\mathcal{D}, \mathcal{T})$, how much does
+$\mathbb{E}[\ell(f_\phi, y)]$ vary across valid choices of $\phi$?
+
+\subsection{Temporal safety}
+
+All views enforce \emph{seed-time semantics}: only information with
+timestamp $\tau \le t_i$ is available to the model.
+For a record table $R$ with timestamps $\tau$, the leakage-safe
+backward as-of join selects
+
+\[
+  r^\star = \arg\max_{r \in R(e_i)} \{\tau_r \mid \tau_r \le t_i\},
+\]
+
+and the lookback-window restriction is
+\[
+  R_W(e_i, t_i) = \{r \in R(e_i) \mid t_i - W \le \tau_r \le t_i\}.
+\]
+
+Temporal train/validation/test splits follow RelBench conventions
+so that no future label information contaminates model selection.
+
+\subsection{The four views}
+\label{sec:views}
+
+\paragraph{View 1: \viewname{JT-Entity}.}
+Entity attributes are denormalized into the task table via leakage-safe
+as-of joins (or static joins for tables without a time column).
+This is the standard joined-table baseline used in tabular ML.
+It contains no summarized event history.
+
+\paragraph{View 2: \viewname{JT-TemporalAgg}.}
+Starting from \viewname{JT-Entity}, we add leakage-safe aggregate
+features computed over $R_W(e_i, t_i)$: row count, recency (days since
+last event), mean, sum, min, max, and number of unique values of each
+numerical column.
+The lookback window $W$ is a design parameter studied in Protocol~B.
+
+\paragraph{View 3: Relational (schema-native).}
+The normalized tables and task metadata are preserved without
+flattening:
+\begin{lstlisting}
+{
+  "db": DatabaseSpec(tables={"entity_table": ...,
+                             "event_table":  ...}),
+  "task": TaskSpec(...)
+}
+\end{lstlisting}
+This view is consumed by schema-native models such as the Relational
+Transformer~\citep{rt}.
+
+\paragraph{View 4: Graphified.}
+The relational payload is augmented with graph construction metadata:
+\begin{lstlisting}
+{
+  "db": DatabaseSpec(...),
+  "task": TaskSpec(...),
+  "graph_config": {"neighborhood_size_k": K}
+}
+\end{lstlisting}
+For each prediction instance, a per-instance \texttt{HeteroData} subgraph
+is constructed with one entity node, temporally-filtered event nodes from
+all FK-linked tables (capped at $K$ nodes per table), and forward plus
+reverse edges.
+This view is consumed by graph models: RGCN, GraphSAGE (in-process), and
+RelGT/ULTRA (via subprocess adapter).
+
+Table~\ref{tab:view_summary} summarizes the four views and their
+target model families.
+
+\begin{table}[t]
+\centering
+\caption{Summary of \cb{} views. All views share identical task
+semantics and temporal safety guarantees.}
+\label{tab:view_summary}
+\begin{tabular}{lllp{5cm}}
+\toprule
+View & Format & History & Target models \\
+\midrule
+\viewname{JT-Entity}       & Flat table   & None (static)         & TabPFN, TabICL, XGBoost \\
+\viewname{JT-TemporalAgg}  & Flat table   & Aggregated ($W$ days) & TabPFN, TabICL, XGBoost \\
+Relational                 & Multi-table  & Full (normalized)     & Relational Transformer (subprocess) \\
+Graphified                 & Per-instance \texttt{HeteroData}  & Full (structural, $\le K$ events/table) & RGCN, GraphSAGE, RelGT (subprocess), ULTRA (subprocess) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Evaluation protocols}
+
+\paragraph{Protocol A: Cross-view comparison.}
+We compare all four views on identical prediction instances, using the
+best-performing model for each view family.
+Metrics include predictive performance (AUROC for classification,
+MAE for regression), compute cost (GPU-hours, peak VRAM), and RIS
+(Section~\ref{sec:ris}).
+
+\paragraph{Protocol B: Brittleness analysis.}
+We ablate each view's construction parameters:
+\begin{itemize}
+  \item lookback window $W \in \{7, 30, 90, \mathrm{None}\}$ for
+        \viewname{JT-TemporalAgg},
+  \item join depth $d \in \{1, 2\}$ for \viewname{JT-Entity},
+  \item graph neighborhood budget $K \in \{100, 300, 500\}$ for the
+        graphified view.
+\end{itemize}
+High sensitivity to these parameters indicates brittleness in that
+representation family.
+
+% -----------------------------------------------------------------------
+\section{Representation Invariance Score}
+\label{sec:ris}
+% -----------------------------------------------------------------------
+
+Let $\mathcal{V} = \{v_1, \ldots, v_m\}$ be the set of views and let
+$\mu_v$ denote the evaluation metric (e.g., AUROC) achieved by the
+best model in view $v$.
+To make scores comparable across tasks with different baseline
+difficulties, we normalize each view's score to a $[0,1]$ utility:
+\[
+  u_v = \frac{\mu_v - \mu_{\text{chance}}}{\mu_{\text{oracle}} - \mu_{\text{chance}}},
+\]
+where $\mu_{\text{chance}}$ is chance-level performance (0.5 for AUROC)
+and $\mu_{\text{oracle}}$ is the best score across all views and models
+on that task (an empirical oracle ceiling).
+
+The \textbf{Representation Invariance Score} for task $\mathcal{T}$ is:
+\[
+  \RIS(\mathcal{T}) = 1 - \sigma(\{u_v\}_{v \in \mathcal{V}}),
+\]
+where $\sigma(\cdot)$ denotes the standard deviation across views.
+$\RIS \in [0, 1]$, where $\RIS = 1$ indicates that all representations
+achieve equal normalized utility (perfect invariance) and lower values
+indicate greater representation sensitivity.
+
+\paragraph{Interpretation.}
+A task with $\RIS < 0.7$ is considered \emph{representation-sensitive}:
+the choice of representation has a material impact on achievable
+performance.
+A task with $\RIS \ge 0.9$ is \emph{representation-robust}: any of the
+three representation families suffices.
+\todo{Calibrate these thresholds empirically across all benchmark
+tasks.}
+
+\paragraph{Decomposition.}
+Across a suite of tasks $\{\mathcal{T}_j\}$, we also report the
+\emph{macro-RIS}:
+\[
+  \overline{\RIS} = \frac{1}{|\mathcal{T}|}\sum_j \RIS(\mathcal{T}_j),
+\]
+and its standard deviation, to summarize benchmark-level consistency.
+
+% -----------------------------------------------------------------------
+\section{Data Construction Pipeline}
+\label{sec:pipeline}
+% -----------------------------------------------------------------------
+
+We implement the \cb{} data construction pipeline on top of RelBench.
+The pipeline takes as input a RelBench dataset and task specification
+and outputs all four views in a unified format.
+
+\subsection{Input: RelBench relational format}
+
+The raw data is stored in normalized relational form.
+For example, for the \texttt{rel-f1 / driver-top3} task, each
+prediction instance is a row \texttt{(date, driverId, qualifying)}
+in the task table.
+To recover context, one must join against \texttt{drivers},
+\texttt{qualifying}, \texttt{results}, and \texttt{standings}
+tables (Tables~\ref{tab:relbench-task-example}--\ref{tab:relbench-history-example}).
+
+\begin{table}[h]
+\centering
+\small
+\caption{Example task row in RelBench for \texttt{driver-top3}.}
+\label{tab:relbench-task-example}
+\begin{tabular}{lll}
+\toprule
+date & driverId & qualifying \\
+\midrule
+2004-08-04 & 12 & 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Corresponding row from the raw \texttt{drivers} table.}
+\label{tab:relbench-drivers-example}
+\begin{tabular}{lllllll}
+\toprule
+driverId & driverRef & code & forename & surname & dob & nationality \\
+\midrule
+12 & massa & MAS & Felipe & Massa & 1981-04-25 & Brazilian \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Historical rows from \texttt{qualifying} and \texttt{results}
+linked to the same driver, available before the seed time.}
+\label{tab:relbench-history-example}
+\begin{tabular}{lllllll}
+\toprule
+table & date & raceId & driverId & position & extra \\
+\midrule
+qualifying & 2004-07-24 & 724 & 12 & 16 & qualifyId=2091 \\
+qualifying & 2004-07-10 & 723 & 12 & 11 & qualifyId=2068 \\
+results    & 2004-07-25 & 724 & 12 & 13 & grid=16, points=0 \\
+results    & 2004-07-11 & 723 & 12 & 9  & grid=10, points=0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{View construction}
+
+\paragraph{\viewname{JT-Entity}.}
+We apply a leakage-safe as-of join from the task table to each
+related entity table.
+For tables without a time column, a static join is used.
+The result is one flat row per prediction instance containing
+entity-level attributes only (no event history).
+
+\paragraph{\viewname{JT-TemporalAgg}.}
+We extend \viewname{JT-Entity} by computing, for each related event
+table $R$ and each numerical column $c$, the following statistics
+over $R_W(e_i, t_i)$:
+\begin{align*}
+  &\texttt{count},\ \texttt{recency\_days},\ \texttt{mean}(c),\
+   \texttt{sum}(c),\ \texttt{min}(c),\ \texttt{max}(c),\ \texttt{nunique}(c).
+\end{align*}
+Missing values arise when no events fall within the window.
+
+\paragraph{Relational and graphified views.}
+Both views wrap the normalized database and task specification in a
+structured payload, with the graphified view adding
+\texttt{neighborhood\_size\_k} as a construction parameter.
+
+\subsection{Actual materialized examples for each view}
+\label{sec:actual_view_examples}
+
+To make the view differences concrete, we show actual rows from the
+\texttt{rel-f1/driver-top3} task for the same prediction instance:
+\texttt{(date = 2004-08-04, driverId = 12, qualifying = 0)}.
+
+\paragraph{\viewname{JT-Entity} (actual row).}
+\begin{table}[h]
+\centering
+\small
+\caption{Actual \viewname{JT-Entity} row (selected columns).}
+\label{tab:jt_entity_actual_example}
+\begin{tabular}{llllllll}
+\toprule
+date & driverId & qualifying & driverRef & code & forename & surname & nationality \\
+\midrule
+2004-08-04 & 12 & 0 & massa & MAS & Felipe & Massa & Brazilian \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{\viewname{JT-TemporalAgg} (actual row).}
+\begin{table}[h]
+\centering
+\small
+\caption{Actual \viewname{JT-TemporalAgg} row (selected aggregate columns).}
+\label{tab:jt_temporalagg_actual_example}
+\begin{tabular}{llllllllll}
+\toprule
+date & driverId & qualifying & qual\_cnt & qual\_recency & qual\_pos\_mean & res\_cnt & res\_pos\_mean & std\_cnt & std\_pos\_mean \\
+\midrule
+2004-08-04 & 12 & 0 & 2 & 11.0 & 13.5 & 2 & 11.0 & 2 & 12.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+In Table~\ref{tab:jt_temporalagg_actual_example}, the shorthand columns map to:
+\texttt{qual\_cnt = qualifying\_\_row\_count},
+\texttt{qual\_recency = qualifying\_\_recency\_days},
+\texttt{qual\_pos\_mean = qualifying\_\_position\_\_mean},
+\texttt{res\_cnt = results\_\_row\_count},
+\texttt{res\_pos\_mean = results\_\_position\_\_mean},
+\texttt{std\_cnt = standings\_\_row\_count},
+\texttt{std\_pos\_mean = standings\_\_position\_\_mean}.
+
+\paragraph{Relational view (actual payload shape).}
+\begin{lstlisting}
+{
+  "db": DatabaseSpec(tables={
+      "drivers": ...,
+      "qualifying": ...,
+      "results": ...,
+      "standings": ...,
+      ...
+  }),
+  "task": TaskSpec(
+      name="rel-f1__driver-top3",
+      task_type="classification",
+      target_col="qualifying",
+      entity_table="drivers",
+      entity_key="driverId",
+      seed_time_col="date"
+  )
+}
+\end{lstlisting}
+
+\paragraph{Graphified view (actual payload and derived row).}
+For the current benchmark runs in this repository, the graph branch is a
+structural count-based proxy. The payload and resulting row for the same
+instance are:
+\begin{lstlisting}
+{
+  "db": DatabaseSpec(...),
+  "task": TaskSpec(...),
+  "graph_config": {"neighborhood_size_k": 300}
+}
+\end{lstlisting}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Actual graphified structural-count row for the same instance.}
+\label{tab:graphified_actual_example}
+\begin{tabular}{llllll}
+\toprule
+date & driverId & qualifying & qual\_count\_leq\_seed & result\_count\_leq\_seed & standing\_count\_leq\_seed \\
+\midrule
+2004-08-04 & 12 & 0 & 14 & 28 & 27 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The count columns in Table~\ref{tab:graphified_actual_example} correspond to:
+\texttt{graphdeg\_\_qualifying\_\_count\_leq\_seed = 14},
+\texttt{graphdeg\_\_results\_\_count\_leq\_seed = 28},
+\texttt{graphdeg\_\_standings\_\_count\_leq\_seed = 27}.
+These values are exactly the number of raw rows linked to
+\texttt{driverId=12} in each table with timestamp \(\le\) seed time.
+
+\subsection{Implemented validation}
+
+We validated the full pipeline on a synthetic benchmark with a
+\texttt{users}/\texttt{transactions} schema.
+The following components have been verified:
+\begin{itemize}
+  \item leakage-safe backward as-of joins produce no post-seed
+        information,
+  \item temporal splits are consistent across all four views,
+  \item \viewname{JT-Entity} and \viewname{JT-TemporalAgg} construction
+        is correct on the synthetic task,
+  \item relational and graphified payloads are well-formed and
+        accepted by downstream model interfaces.
+\end{itemize}
+
+% -----------------------------------------------------------------------
+\section{Experiments}
+\label{sec:experiments}
+% -----------------------------------------------------------------------
+
+\subsection{Datasets and tasks}
+
+\paragraph{Current results: \texttt{rel-f1 / driver-top3}.}
+This task asks whether a given Formula~1 driver will qualify in the
+top three in a race within the next month.
+It is a binary classification task evaluated with AUROC.
+We use the official RelBench temporal split.
+
+\paragraph{\todo{Additional tasks (to be added before submission).}}
+We plan to evaluate \cb{} on the following additional RelBench tasks
+to ensure generality of findings:
+\begin{itemize}
+  \item \todo{\texttt{rel-amazon / user-churn} (e-commerce, regression)},
+  \item \todo{\texttt{rel-stack / post-votes} (community Q\&A, regression)},
+  \item \todo{\texttt{rel-trial / site-success} (clinical trial, classification)},
+  \item \todo{at least one additional classification task from a
+        different domain to cover at least 4 tasks across 3 datasets}.
+\end{itemize}
+This coverage ensures that conclusions about representation
+sensitivity are not specific to the Formula~1 domain.
+
+\subsection{Models and baselines}
+
+For joined-table views, we use:
+\begin{itemize}
+  \item \textbf{TabPFN}~\citep{tabpfn}: a prior-fitted Bayesian
+        in-context learner for small tabular datasets.
+  \item \textbf{TabICL}~\citep{tabicl}: a larger in-context learner
+        with improved scaling.
+  \item \textbf{XGBoost}: a gradient-boosted tree baseline
+        (\texttt{XGBClassifier}/\texttt{XGBRegressor}, \texttt{tree\_method=hist},
+        500 estimators) for comparison with foundation models.
+\end{itemize}
+
+For the relational view:
+\begin{itemize}
+  \item \textbf{Relational Transformer}~\citep{rt}: the schema-native
+        baseline, integrated via a subprocess adapter
+        (\texttt{OfficialRelationalTransformerAdapter}) that invokes
+        the official RT implementation and scrapes the reported test metric.
+        Requires Linux and CUDA; currently returns a \texttt{precomputed\_test\_metric}.
+\end{itemize}
+
+For the graphified view:
+\begin{itemize}
+  \item \textbf{RGCN}: a relational graph convolutional network
+        (\texttt{GCNConv} with per-type projections) trained in-process
+        via PyTorch Geometric.
+  \item \textbf{GraphSAGE}: a heterogeneous GraphSAGE
+        (\texttt{SAGEConv} per edge type) trained in-process.
+  \item \textbf{RelGT}~\citep{relgt}: a graph transformer for
+        relational databases, integrated via a subprocess adapter
+        (\texttt{RelGTSubprocessAdapter}); requires Linux and CUDA.
+  \item \textbf{ULTRA}: a universal link-prediction foundation model,
+        integrated via a subprocess adapter (\texttt{ULTRASubprocessAdapter}).
+        Note: ULTRA is designed for KG link prediction; applying it to
+        entity-property prediction requires reformulation as link scoring.
+\end{itemize}
+
+\paragraph{Implementation status.}
+RGCN and GraphSAGE are fully in-process and produce row-level predictions.
+Both share a common training loop with Adam, \texttt{ReduceLROnPlateau},
+early stopping, class-balance weighting (\texttt{pos\_weight}), and
+gradient clipping.
+RelGT, ULTRA, and RT are integrated via subprocess adapters and return
+pre-computed test metrics.
+Results in Tables~\ref{tab:protocol-a-driver-top3}
+and~\ref{tab:protocol-b-driver-top3} currently cover joined-table
+baselines and count-feature graphified results; GNN and RT runs are
+\todo{pending execution}.
+GPU peak VRAM is tracked automatically via
+\texttt{torch.cuda.max\_memory\_allocated()} for all GPU-accelerated
+models and reported in the compute-cost analysis.
+
+\subsection{Protocol A results}
+\label{sec:protocol_a_results}
+
+\begin{table}[t]
+\centering
+\caption{Protocol~A results on \texttt{rel-f1/driver-top3}.
+         AUROC; chance level = 0.5. Results marked \dag{} are
+         from stub or count-feature implementations and will be
+         replaced with full model results.}
+\label{tab:protocol-a-driver-top3}
+\begin{tabular}{llll}
+\toprule
+View & Model & AUROC & Status \\
+\midrule
+\viewname{JT-Entity}                & TabPFN         & 0.469                  & Full \\
+\viewname{JT-Entity} ($d=1$)        & XGBoost        & \todo{pending}         & Full \\
+\viewname{JT-TemporalAgg} (30-day)  & TabPFN         & 0.682                  & Full \\
+\viewname{JT-TemporalAgg} (30-day)  & XGBoost        & \todo{pending}         & Full \\
+Relational                          & RT (subprocess)& \todo{pending}         & Subprocess\dag \\
+Graphified ($K=300$)                & Count features & 0.670                  & Partial\dag \\
+Graphified ($K=300$)                & RGCN           & \todo{pending}         & Full \\
+Graphified ($K=300$)                & GraphSAGE      & \todo{pending}         & Full \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:protocol-a-driver-top3} reveals a clear pattern.
+The static entity snapshot (\viewname{JT-Entity}) scores 0.469,
+below chance level.
+This indicates that static driver attributes (nationality, date of
+birth, driver reference code) contain essentially no signal for
+predicting near-term qualifying outcomes.
+Introducing temporal aggregates over a 30-day window (\viewname{JT-TemporalAgg})
+raises AUROC to 0.682, confirming that recent race history is a strong
+predictor.
+The count-feature graphified view (0.670) is competitive with the
+30-day aggregate, suggesting that the structural count of past
+linked records carries similar information to mean-aggregated statistics
+at this window size.
+XGBoost, RGCN, and GraphSAGE results are pending execution;
+RT results are pending subprocess integration on a CUDA node.
+
+\paragraph{Sub-chance entity performance.}
+The 0.469 AUROC of \viewname{JT-Entity} merits a note.
+At a \emph{dataset level}, chance performance is 0.5; individual
+model runs can fall slightly below due to finite-sample variance,
+class imbalance, or overfitting on small splits.
+\todo{Report class imbalance ratio and confirm with multiple random
+seeds.}
+
+\subsection{Protocol B ablation results}
+\label{sec:protocol_b_results}
+
+\begin{table}[t]
+\centering
+\caption{Protocol~B ablations on \texttt{rel-f1/driver-top3}.}
+\label{tab:protocol-b-driver-top3}
+\begin{tabular}{llll}
+\toprule
+Parameter & Setting & View & AUROC \\
+\midrule
+\multirow{4}{*}{Lookback $W$}
+  & 7 days          & \viewname{JT-TemporalAgg} & 0.611 \\
+  & 30 days         & \viewname{JT-TemporalAgg} & 0.682 \\
+  & 90 days         & \viewname{JT-TemporalAgg} & \todo{pending} \\
+  & $\infty$ (all history) & \viewname{JT-TemporalAgg} & \textbf{0.802} \\
+\midrule
+\multirow{2}{*}{Join depth $d$}
+  & $d=1$ & \viewname{JT-Entity} & 0.469 \\
+  & $d=2$ & \viewname{JT-Entity} & \todo{pending} \\
+\midrule
+\multirow{3}{*}{Neighborhood $K$}
+  & 100 & Graphified & 0.576 \\
+  & 300 & Graphified & 0.670 \\
+  & 500 & Graphified & 0.670 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Protocol~B results in Table~\ref{tab:protocol-b-driver-top3} clarify
+the source of performance variation.
+
+\paragraph{Window sensitivity (\viewname{JT-TemporalAgg}).}
+Performance increases monotonically with lookback window size,
+reaching 0.802 when all available history is used.
+This is a strong effect: the gap between $W=7$ and
+$W=\infty$ is 0.191 AUROC points.
+The 90-day result (\todo{pending}) will quantify how much of the
+remaining gain comes from history beyond the first month.
+This indicates that for \texttt{driver-top3}, the predictive signal
+is distributed across the \emph{full career history} of a driver,
+not only recent races.
+Models that access only recent context (e.g., sliding-window
+approaches) will be at a systematic disadvantage on this task.
+
+\paragraph{Join-depth sensitivity (\viewname{JT-Entity}).}
+We ablate join depth $d \in \{1, 2\}$.
+At $d=1$, only direct entity attributes are included (e.g., the
+\texttt{drivers} row).
+At $d=2$, attributes of entities reachable via one FK hop are also
+denormalized (e.g., constructor attributes).
+Results for $d=2$ are \todo{pending}.
+
+\paragraph{Neighborhood sensitivity (Graphified).}
+Increasing $K$ from 100 to 300 improves AUROC from 0.576 to 0.670,
+but further increasing to $K=500$ yields no improvement.
+This saturation is consistent with the small number of incident tables
+in the \texttt{rel-f1} schema: once the neighborhood budget covers
+all linked qualifying and results records, additional budget adds
+no new information.
+\todo{Verify with a schema that has deeper relational structure
+(e.g., \texttt{rel-amazon}) to test whether saturation persists.}
+
+\paragraph{RIS computation (preliminary).}
+Using the Protocol~A AUROC scores and $\mu_\text{chance} = 0.5$,
+$\mu_\text{oracle} = 0.802$ (best observed across all completed settings):
+\begin{align*}
+  u_\text{JT-Entity} &= (0.469 - 0.5) / (0.802 - 0.5) = -0.10, \\
+  u_\text{JT-TemporalAgg} &= (0.682 - 0.5) / 0.302 = 0.60, \\
+  u_\text{Graphified} &= (0.670 - 0.5) / 0.302 = 0.56.
+\end{align*}
+This yields $\RIS = 1 - \sigma(-0.10,\, 0.60,\, 0.56) \approx 0.65$,
+classifying \texttt{driver-top3} as \emph{representation-sensitive}
+($\RIS < 0.7$).
+These utilities are computed by \texttt{compute\_ris()} in the harness,
+which implements the chance/oracle normalization exactly as defined above.
+\todo{Recompute once RGCN/GraphSAGE/RT/XGBoost results are integrated;
+the oracle ceiling will likely rise, revising all utilities.}
+Macro-RIS across the full task suite will be reported via
+\texttt{compute\_macro\_ris()}, which averages per-task RIS values and
+reports the standard deviation across tasks.
+
+\subsection{\todo{Planned experiments}}
+
+The following experiments are required before submission to establish
+the generality of \cb{} findings:
+
+\begin{enumerate}
+  \item \textbf{Additional tasks.} Run Protocol~A and B on the four
+        additional RelBench tasks listed in Section~\ref{sec:experiments}.
+        Report per-task AUROC/MAE and RIS, and macro-RIS across tasks
+        via \texttt{compute\_macro\_ris()}.
+  \item \textbf{Full relational baseline.} Execute the official
+        Relational Transformer via \texttt{OfficialRelationalTransformerAdapter}
+        (subprocess) on a Linux+CUDA node for all tasks.
+        [\emph{Adapter implemented; execution pending.}]
+  \item \textbf{In-process GNN baselines.} Execute RGCN and GraphSAGE
+        (fully implemented in \texttt{adapter\_graph\_nn.py}) on the
+        graphified view for all tasks.
+        [\emph{Models implemented; execution pending.}]
+  \item \textbf{RelGT and ULTRA baselines.} Execute RelGT via
+        \texttt{RelGTSubprocessAdapter} and ULTRA via
+        \texttt{ULTRASubprocessAdapter} on a Linux+CUDA node.
+        [\emph{Adapters implemented; execution pending. Note: ULTRA
+        requires reformulation from KG link-prediction to entity
+        classification.}]
+  \item \textbf{XGBoost baseline.} Execute XGBoost
+        (\texttt{build\_xgboost()} via \texttt{--models xgboost})
+        on \viewname{JT-Entity} and \viewname{JT-TemporalAgg}.
+        [\emph{Implemented; execution pending.}]
+  \item \textbf{Protocol~B join-depth and 90-day ablations.}
+        Run $d=2$ (\viewname{JT-Entity}) and $W=90$ (\viewname{JT-TemporalAgg})
+        ablations now wired into the default Protocol~B configuration.
+        [\emph{Configuration implemented; execution pending.}]
+  \item \textbf{Compute cost analysis.} Report GPU-hours and peak VRAM
+        (tracked via \texttt{peak\_gpu\_vram\_mb} in \texttt{compute\_tracker})
+        for each model/view combination.
+  \item \textbf{Multi-seed evaluation.} Report mean $\pm$ std across
+        at least 3 random seeds to confirm stability of AUROC
+        estimates.
+\end{enumerate}
+
+% -----------------------------------------------------------------------
+\section{Discussion}
+\label{sec:discussion}
+% -----------------------------------------------------------------------
+
+\paragraph{Representation sensitivity is task-dependent.}
+The \texttt{driver-top3} experiments show that representation choice
+has a large effect on achievable performance for this task.
+Static entity information is nearly useless; historical aggregates are
+essential.
+Whether this pattern generalizes to other relational tasks---or whether
+some tasks are truly representation-invariant---is precisely the
+question \cb{} is designed to answer at scale.
+
+\paragraph{Temporal depth matters more than representation family.}
+Within the joined-table family, the single largest performance gain
+comes from extending the lookback window from 30 days to all available
+history (0.682 $\to$ 0.802), not from switching representation
+families.
+This suggests that the most impactful design decision for practitioners
+is the temporal depth of feature engineering, not the choice between
+tabular and graph representations---at least for tasks with a strong
+career-history signal.
+
+\paragraph{Graph neighborhood saturation.}
+The graphified view saturates at $K = 300$ for \texttt{rel-f1}.
+This is expected given the shallow schema structure of the dataset.
+Richer schemas with deeper relational hierarchies may require larger
+budgets and may show greater variance in performance with $K$, making
+Protocol~B a useful diagnostic tool.
+
+\paragraph{Limitations.}
+The current results cover a single dataset and task, and the relational
+and graph views are not yet backed by full model implementations.
+All conclusions should therefore be treated as preliminary until the
+full experimental suite is complete.
+Additionally, RIS as currently defined uses an empirical oracle
+ceiling, which means it cannot be compared across benchmarks without
+a common normalization scheme.
+\todo{Consider fixed, task-type-specific oracle ceilings based on
+upper-bound estimates from the literature.}
+
+% -----------------------------------------------------------------------
+\section{Conclusion}
+\label{sec:conclusion}
+% -----------------------------------------------------------------------
+
+We have presented \cb{}, a tri-view benchmark for studying
+representation invariance in relational machine learning.
+\cb{} enforces identical task semantics and temporal safety guarantees
+across four derived views---joined-table entity, joined-table temporal
+aggregate, schema-native relational, and graphified---and provides a
+unified evaluation protocol for comparing tabular, relational, and
+graph-based models.
+
+Our initial results on \texttt{rel-f1 / driver-top3} demonstrate that
+representation choice has a substantial impact on predictive
+performance for this task, with the temporal aggregate view outperforming
+the static entity view by more than 0.3 AUROC points at full
+lookback.
+The Representation Invariance Score formalizes this sensitivity in a
+task-agnostic way.
+
+We are extending \cb{} to \todo{N} tasks across \todo{M} RelBench
+datasets, and integrating full Relational Transformer and RelGT
+baselines to enable true tri-view comparison.
+We will release the full pipeline and evaluation harness to support
+reproducible research on relational representation learning.
+
+% -----------------------------------------------------------------------
+\section*{Acknowledgements}
+% -----------------------------------------------------------------------
+\todo{Add acknowledgements, and compute credits.}
+
+% -----------------------------------------------------------------------
+\bibliographystyle{plainnat}
+\begin{thebibliography}{9}
+
+\bibitem[Fey et al.(2024)]{relbench}
+Matthias Fey, Weihua Hu, Kexin Huang, Jan Eric Lenssen, Rishabh Ranjan,
+Joshua Robinson, Rex Ying, Jiaxuan You, and Jure Leskovec.
+\newblock RelBench: A benchmark for deep learning on relational databases.
+\newblock In \emph{Advances in Neural Information Processing Systems
+  (NeurIPS)}, 2024.
+
+\bibitem[Ranjan et al.(2025)]{rt}
+R.~Ranjan, V.~Hudovernik, M.~Znidar, C.~I.~Kanatsoulis,
+R.~R.~Upendra, M.~Mohammadi, J.~Meyer, T.~Palczewski, C.~Guestrin,
+and J.~Leskovec.
+\newblock Relational Transformer: Toward zero-shot foundation models for
+  relational data.
+\newblock \emph{arXiv preprint arXiv:2510.06377}, 2025.
+\newblock \textbf{[Note: verify this preprint exists and is citable before
+  submission.]}
+
+\bibitem[Dwivedi et al.(2025)]{relgt}
+V.~P.~Dwivedi, S.~Jaladi, Y.~Shen, F.~L\'opez, C.~I.~Kanatsoulis,
+R.~Puri, M.~Fey, and J.~Leskovec.
+\newblock Relational Graph Transformer.
+\newblock \emph{arXiv preprint arXiv:2505.10960}, 2025.
+
+\bibitem[Hollmann et al.(2022)]{tabpfn}
+Noah Hollmann, Samuel M\"uller, Katharina Eggensperger, and Frank Hutter.
+\newblock TabPFN: A transformer that solves small tabular classification
+  problems in a second.
+\newblock In \emph{International Conference on Learning Representations
+  (ICLR)}, 2023.
+
+\bibitem[Ma et al.(2025)]{tabicl}
+\todo{Add correct TabICL citation once publication details confirmed.}
+
+\bibitem[Kanter and Veeramachaneni(2015)]{featuretools}
+James Max Kanter and Kalyan Veeramachaneni.
+\newblock Deep feature synthesis: Towards automating data science endeavors.
+\newblock In \emph{IEEE International Conference on Data Science and Advanced
+  Analytics}, 2015.
+
+\bibitem[Xu et al.(2013)]{multiview_survey}
+Chang Xu, Dacheng Tao, and Chao Xu.
+\newblock A survey on multi-view learning.
+\newblock \emph{arXiv preprint arXiv:1304.5634}, 2013.
+
+\end{thebibliography}
+
+\end{document}

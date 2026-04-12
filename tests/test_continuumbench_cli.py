@@ -14,6 +14,10 @@ class ContinuumBenchCliTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             continuumbench._parse_models("tabicl,unknown")
 
+    def test_parse_models_accepts_xgboost(self):
+        models = continuumbench._parse_models("xgboost")
+        self.assertEqual(models, ["xgboost"])
+
     def test_task_source_metadata_for_synthetic_source(self):
         args = argparse.Namespace(
             task_source="synthetic",
@@ -31,9 +35,24 @@ class ContinuumBenchCliTests(unittest.TestCase):
             [cfg.view_name for cfg in configs.joined_table_cfgs],
             ["jt_entity", "jt_temporalagg"],
         )
+        # Lookback window sweep (W ∈ {7, 30, 90, None}) + JT-Entity hop sweep (d ∈ {1, 2})
+        temporal_agg_cfgs = [
+            cfg
+            for cfg in configs.joined_ablation_cfgs
+            if cfg.view_name == "jt_temporalagg"
+        ]
         self.assertEqual(
-            [cfg.lookback_days for cfg in configs.joined_ablation_cfgs],
-            [7, 30, None],
+            [cfg.lookback_days for cfg in temporal_agg_cfgs],
+            [7, 30, 90, None],
+        )
+        entity_hop_cfgs = [
+            cfg
+            for cfg in configs.joined_ablation_cfgs
+            if cfg.view_name == "jt_entity"
+        ]
+        self.assertEqual(
+            [cfg.max_path_hops for cfg in entity_hop_cfgs],
+            [1, 2],
         )
         self.assertEqual(configs.graph_k_values, (100, 300, 500))
 

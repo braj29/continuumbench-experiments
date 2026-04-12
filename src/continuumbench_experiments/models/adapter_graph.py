@@ -17,6 +17,9 @@ from .adapter_common import (
 )
 
 
+GRAPH_PROXY_VIEW_NAME = "structural-count-proxy"
+
+
 class GraphifiedSklearnAdapter(BaseViewModel):
     _K_TABLE_CAP_DIVISOR = 100
 
@@ -30,7 +33,7 @@ class GraphifiedSklearnAdapter(BaseViewModel):
     ):
         self.estimator = estimator
         self._name = name
-        self._view_name = "graphified"
+        self._view_name = GRAPH_PROXY_VIEW_NAME
         self.preprocessor: Optional[TabularPreprocessor] = None
         self.max_train_rows = max_train_rows
         self.subsample_seed = int(subsample_seed)
@@ -88,7 +91,12 @@ class GraphifiedSklearnAdapter(BaseViewModel):
         )
         self.estimator.fit(_dense_feature_matrix(X_train), y_train)
 
-        metadata: dict[str, Any] = {"status": "ok", "graphified": "incident_degree_counts"}
+        metadata: dict[str, Any] = {
+            "status": "ok",
+            "graph_proxy": "incident_degree_counts",
+            # Backward-compatibility key used by older analysis scripts.
+            "graphified": "incident_degree_counts",
+        }
         if self._max_incident_tables is not None:
             metadata["max_incident_tables"] = self._max_incident_tables
         return metadata
@@ -122,7 +130,7 @@ class ExternalGraphAdapter(BaseViewModel):
         **kwargs: Any,
     ):
         self._name = name
-        self._view_name = "graphified"
+        self._view_name = GRAPH_PROXY_VIEW_NAME
         self.fit_fn = fit_fn
         self.predict_fn = predict_fn
         self.kwargs = kwargs

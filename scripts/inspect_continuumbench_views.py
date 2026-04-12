@@ -32,7 +32,9 @@ def _parse_optional_int(value: str) -> int | None:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Inspect ContinuumBench joined, graphified, and relational views."
+        description=(
+            "Inspect ContinuumBench joined, structural-count-proxy (graph), and relational views."
+        )
     )
     parser.add_argument(
         "--view",

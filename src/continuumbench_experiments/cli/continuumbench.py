@@ -25,9 +25,13 @@ from ..models import (
     SUPPORTED_MODEL_NAMES,
     BaseViewModel,
     ExternalRelationalAdapter,
+    GraphSAGEAdapter,
     GraphifiedSklearnAdapter,
     OfficialRelationalTransformerAdapter,
+    RGCNAdapter,
+    RelGTSubprocessAdapter,
     SklearnTabularAdapter,
+    ULTRASubprocessAdapter,
     build_tabular_estimator,
     default_max_train_rows,
     resolve_tabicl_device,
@@ -38,6 +42,11 @@ from ..models import (
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_GRAPH_K_VALUES = (100, 300, 500)
+LEGACY_GRAPH_VIEW_NAME = "graphified"
+GRAPH_PROXY_VIEW_NAME = "structural-count-proxy"
+
+# Graph model choices exposed via --graph-model
+GRAPH_MODEL_CHOICES = ("count-proxy", "rgcn", "graphsage", "relgt", "ultra")
 
 
 @dataclass(frozen=True)
@@ -61,14 +70,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run TabICL/TabPFN on the ContinuumBench-style tri-view harness. "
-            "Default task source uses a registered dataset/task pair so the joined, "
-            "graph-degree, and optional official Relational Transformer tracks target "
-            "the same entity task."
+            "Run tabular and graph models on the ContinuumBench tri-view harness. "
+            "Joined-table tracks use tabicl/tabpfn/xgboost; graph track supports "
+            "count-proxy, rgcn, graphsage, relgt, and ultra."
         )
     )
     _add_problem_args(parser)
     _add_model_args(parser)
+    _add_graph_model_args(parser)
     _add_relational_transformer_args(parser)
     return parser
 
@@ -108,7 +117,7 @@ def _add_model_args(parser: argparse.ArgumentParser) -> None:
         "--models",
         type=str,
         default="tabicl,tabpfn",
-        help="Comma-separated list from {tabicl,tabpfn}.",
+        help="Comma-separated list from {tabicl,tabpfn,xgboost}.",
     )
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument(
@@ -148,6 +157,68 @@ def _add_model_args(parser: argparse.ArgumentParser) -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Run Protocol B ablations in addition to Protocol A.",
+    )
+
+
+def _add_graph_model_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--graph-model",
+        type=str,
+        default="count-proxy",
+        choices=GRAPH_MODEL_CHOICES,
+        help=(
+            "Graph-view model for Protocol A/B. "
+            "'count-proxy': structural degree-count features + tabfm (default, no extra deps). "
+            "'rgcn': in-process RGCN (requires torch-geometric). "
+            "'graphsage': in-process GraphSAGE (requires torch-geometric). "
+            "'relgt': RelGT subprocess (requires --relgt-repo-path + Linux/CUDA). "
+            "'ultra': ULTRA subprocess (requires --ultra-repo-path + task adaptation)."
+        ),
+    )
+    # GNN hyperparameters (used by rgcn / graphsage)
+    parser.add_argument("--gnn-hidden-dim", type=int, default=128)
+    parser.add_argument("--gnn-num-layers", type=int, default=2)
+    parser.add_argument("--gnn-max-epochs", type=int, default=200)
+    parser.add_argument("--gnn-patience", type=int, default=20)
+    parser.add_argument("--gnn-lr", type=float, default=1e-3)
+    parser.add_argument("--gnn-batch-size", type=int, default=64)
+    parser.add_argument("--gnn-neighborhood-k", type=int, default=None,
+                        help="Neighbourhood cap per event table for GNN subgraphs.")
+    # RelGT subprocess args
+    parser.add_argument(
+        "--relgt-repo-path",
+        type=str,
+        default=None,
+        help="Path to cloned RelGT repo (arXiv:2505.10960). Required for --graph-model relgt.",
+    )
+    parser.add_argument("--relgt-num-neighbors", type=int, default=512)
+    parser.add_argument("--relgt-epochs", type=int, default=20)
+    parser.add_argument("--relgt-hidden-channels", type=int, default=128)
+    parser.add_argument(
+        "--relgt-python-executable",
+        type=str,
+        default=None,
+        help="Python executable for the RelGT subprocess (defaults to current interpreter).",
+    )
+    # ULTRA subprocess args
+    parser.add_argument(
+        "--ultra-repo-path",
+        type=str,
+        default=None,
+        help=(
+            "Path to cloned ULTRA repo (https://github.com/DeepGraphLearning/ULTRA). "
+            "Required for --graph-model ultra. Note: requires task adaptation for "
+            "entity property prediction (ULTRA is designed for KG link prediction)."
+        ),
+    )
+    parser.add_argument("--ultra-epochs", type=int, default=10)
+    parser.add_argument("--ultra-config-path", type=str, default=None,
+                        help="Path to a ULTRA YAML config file (optional override).")
+    parser.add_argument(
+        "--ultra-python-executable",
+        type=str,
+        default=None,
+        help="Python executable for the ULTRA subprocess (defaults to current interpreter).",
     )
 
 
@@ -252,7 +323,7 @@ def _validate_models_for_task(models: list[str], task: TaskSpec) -> None:
     if task.task_type == "regression" and "tabicl" in models:
         raise ValueError(
             "TabICL does not support regression tasks in this harness. "
-            "Use --models tabpfn for regression tasks."
+            "Use --models tabpfn or --models xgboost for regression tasks."
         )
 
 
@@ -268,6 +339,7 @@ def _build_estimator(model_name: str, args: argparse.Namespace, task: TaskSpec):
         tabicl_device=_tabicl_runtime_device(args),
         tabicl_use_amp=args.tabicl_use_amp,
         ignore_pretraining_limits=args.tabpfn_ignore_pretraining_limits,
+        seed=args.seed,
     )
 
 
@@ -278,7 +350,67 @@ def _build_joined_model(model_name: str, args: argparse.Namespace, task: TaskSpe
     )
 
 
+def _gnn_kwargs(args: argparse.Namespace) -> dict:
+    return {
+        "hidden_dim": args.gnn_hidden_dim,
+        "num_layers": args.gnn_num_layers,
+        "max_epochs": args.gnn_max_epochs,
+        "patience": args.gnn_patience,
+        "lr": args.gnn_lr,
+        "batch_size": args.gnn_batch_size,
+        "neighborhood_k": args.gnn_neighborhood_k,
+        "device": args.device,
+    }
+
+
 def _build_graph_model(model_name: str, args: argparse.Namespace, task: TaskSpec) -> BaseViewModel:
+    """Build the graph-track model specified by --graph-model."""
+    graph_model = getattr(args, "graph_model", "count-proxy")
+
+    if graph_model == "rgcn":
+        return RGCNAdapter(name=f"rgcn", **_gnn_kwargs(args))
+
+    if graph_model == "graphsage":
+        return GraphSAGEAdapter(name="graphsage", **_gnn_kwargs(args))
+
+    if graph_model == "relgt":
+        repo = args.relgt_repo_path
+        if not repo:
+            raise ValueError(
+                "--relgt-repo-path is required when --graph-model relgt. "
+                "Clone the RelGT repo and pass its path."
+            )
+        return RelGTSubprocessAdapter(
+            dataset_name=args.dataset_name,
+            task_name=args.task_name,
+            target_col=task.target_col,
+            relgt_repo_path=repo,
+            python_executable=args.relgt_python_executable,
+            seed=args.seed,
+            num_neighbors=args.relgt_num_neighbors,
+            hidden_channels=args.relgt_hidden_channels,
+            epochs=args.relgt_epochs,
+        )
+
+    if graph_model == "ultra":
+        repo = args.ultra_repo_path
+        if not repo:
+            raise ValueError(
+                "--ultra-repo-path is required when --graph-model ultra. "
+                "Clone ULTRA from https://github.com/DeepGraphLearning/ULTRA and pass its path."
+            )
+        return ULTRASubprocessAdapter(
+            dataset_name=args.dataset_name,
+            task_name=args.task_name,
+            target_col=task.target_col,
+            ultra_repo_path=repo,
+            python_executable=args.ultra_python_executable,
+            config_path=args.ultra_config_path,
+            seed=args.seed,
+            epochs=args.ultra_epochs,
+        )
+
+    # Default: count-proxy (structural degree features + tabfm estimator)
     return GraphifiedSklearnAdapter(
         estimator=_build_estimator(model_name, args, task),
         **_adapter_kwargs(model_name, args),
@@ -290,7 +422,31 @@ def _build_graph_model_factory(
     args: argparse.Namespace,
     task: TaskSpec,
 ) -> Callable[[int], list[BaseViewModel]]:
-    def factory(_graph_k: int) -> list[BaseViewModel]:
+    """Factory used by Protocol B graph ablations (K-sweep).
+
+    GNN models (rgcn/graphsage/relgt/ultra) don't use the K parameter the same
+    way as count-proxy, so for those the factory returns the same model regardless
+    of k; the K-sweep ablation is meaningful only for the count-proxy track.
+    """
+    def factory(graph_k: int) -> list[BaseViewModel]:
+        graph_model = getattr(args, "graph_model", "count-proxy")
+        if graph_model == "count-proxy":
+            # K is already embedded in the payload by the runner; the factory
+            # just produces a fresh adapter whose fit() will read it from there.
+            return [
+                GraphifiedSklearnAdapter(
+                    estimator=_build_estimator(model_name, args, task),
+                    **_adapter_kwargs(model_name, args),
+                )
+            ]
+        # For in-process GNN models, override neighborhood_k with the ablation
+        # value so the K-sweep tests different subgraph sizes.
+        gnn_kw = {**_gnn_kwargs(args), "neighborhood_k": graph_k}
+        if graph_model == "rgcn":
+            return [RGCNAdapter(name=f"rgcn-K{graph_k}", **gnn_kw)]
+        if graph_model == "graphsage":
+            return [GraphSAGEAdapter(name=f"graphsage-K{graph_k}", **gnn_kw)]
+        # Subprocess models (relgt, ultra) don't support per-run K override.
         return [_build_graph_model(model_name, args, task)]
 
     return factory
@@ -388,9 +544,14 @@ def _default_protocol_configs() -> ProtocolConfigs:
             JoinedTableConfig(view_name="jt_temporalagg", max_path_hops=1, lookback_days=30),
         ),
         joined_ablation_cfgs=(
+            # Protocol B: lookback window sweep for JT-TemporalAgg (W ∈ {7, 30, 90, None})
             JoinedTableConfig(view_name="jt_temporalagg", max_path_hops=1, lookback_days=7),
             JoinedTableConfig(view_name="jt_temporalagg", max_path_hops=1, lookback_days=30),
+            JoinedTableConfig(view_name="jt_temporalagg", max_path_hops=1, lookback_days=90),
             JoinedTableConfig(view_name="jt_temporalagg", max_path_hops=1, lookback_days=None),
+            # Protocol B: join depth sweep for JT-Entity (d ∈ {1, 2})
+            JoinedTableConfig(view_name="jt_entity", max_path_hops=1),
+            JoinedTableConfig(view_name="jt_entity", max_path_hops=2),
         ),
     )
 
@@ -407,6 +568,35 @@ def _emit_runtime_warnings(models: Sequence[str], args: argparse.Namespace) -> N
         print(
             "continuumbench: relational track is using rt-stub, not the official "
             "Relational Transformer. Pass --use-official-rt-relational to benchmark RT.",
+            file=sys.stderr,
+            flush=True,
+        )
+    graph_model = getattr(args, "graph_model", "count-proxy")
+    if graph_model == "count-proxy":
+        print(
+            "continuumbench: graph track uses a structural degree-count proxy "
+            "(not a full GNN). Use --graph-model rgcn or graphsage for in-process GNNs.",
+            file=sys.stderr,
+            flush=True,
+        )
+    elif graph_model in ("rgcn", "graphsage"):
+        print(
+            f"continuumbench: graph track using in-process {graph_model.upper()} "
+            "(requires torch-geometric).",
+            file=sys.stderr,
+            flush=True,
+        )
+    elif graph_model == "relgt":
+        print(
+            "continuumbench: graph track using RelGT subprocess "
+            "(requires Linux+CUDA and --relgt-repo-path).",
+            file=sys.stderr,
+            flush=True,
+        )
+    elif graph_model == "ultra":
+        print(
+            "continuumbench: graph track using ULTRA subprocess "
+            "(requires --ultra-repo-path and task adaptation for entity prediction).",
             file=sys.stderr,
             flush=True,
         )
@@ -443,8 +633,38 @@ def _announce_protocol(model_name: str, protocol_name: str) -> None:
     print(f"=== Running {protocol_name} with {model_name} ===", flush=True)
 
 
+def _display_view_name(view_name: str) -> str:
+    if view_name == LEGACY_GRAPH_VIEW_NAME:
+        return GRAPH_PROXY_VIEW_NAME
+    return view_name
+
+
+def _display_representation_key(key: str) -> str:
+    return key.replace(LEGACY_GRAPH_VIEW_NAME, GRAPH_PROXY_VIEW_NAME)
+
+
 def _print_protocol_summary(summary) -> None:
-    print(summary.to_frame()[["model_name", "view_name", "metric_value"]])
+    table = summary.to_frame()[["model_name", "view_name", "metric_value"]].copy()
+    table["view_name"] = table["view_name"].map(_display_view_name)
+    print(table)
+
+
+def _print_protocol_ris(summary, protocol_name: str) -> None:
+    print(f"{protocol_name} RIS:")
+    for task_name, payload in summary.per_task_ris.items():
+        ris = float(payload["ris"])
+        utility_std = float(payload["utility_std"])
+        utility_gap = float(payload["utility_gap"])
+        print(
+            f"  task={task_name} ris={ris:.6f} "
+            f"utility_std={utility_std:.6f} utility_gap={utility_gap:.6f}"
+        )
+        representation_scores = payload.get("representation_scores", {})
+        for key in sorted(representation_scores):
+            print(
+                f"    {_display_representation_key(str(key))}: "
+                f"{float(representation_scores[key]):.6f}"
+            )
 
 
 def _run_model(
@@ -473,6 +693,7 @@ def _run_model(
         graph_models=graph_models,
     )
     _print_protocol_summary(summary_a)
+    _print_protocol_ris(summary_a, "Protocol A")
 
     manifest = {
         **_task_source_metadata(args),
@@ -493,6 +714,7 @@ def _run_model(
             graph_models_factory=_build_graph_model_factory(model_name, args, problem.task),
         )
         _print_protocol_summary(summary_b)
+        _print_protocol_ris(summary_b, "Protocol B")
         manifest["protocol_b"] = _protocol_artifacts(problem.task.name, "protocol_b")
 
     return manifest

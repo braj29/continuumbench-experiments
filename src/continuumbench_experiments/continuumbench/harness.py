@@ -6,7 +6,7 @@ Compatibility facade for the ContinuumBench core.
 Reviewer-friendly implementation now lives in smaller modules:
 - `specs.py`: data contracts and experiment config
 - `metrics.py`: scoring, RIS, temporal splits, diagnostics
-- `views.py`: joined-table and graphified view construction
+- `views.py`: joined-table and structural count proxy view construction
 - `runner.py`: Protocol A / B execution
 - `examples.py`: synthetic demo problem
 - `models/adapters.py`: model-facing adapters and wrappers
@@ -16,11 +16,15 @@ from ..models.adapters import (
     BaseViewModel,
     ExternalGraphAdapter,
     ExternalRelationalAdapter,
+    GraphSAGEAdapter,
     GraphifiedSklearnAdapter,
     LightGBMTabularAdapter,
     MeanDummyAdapter,
     OfficialRelationalTransformerAdapter,
+    RGCNAdapter,
+    RelGTSubprocessAdapter,
     SklearnTabularAdapter,
+    ULTRASubprocessAdapter,
     _dense_feature_matrix,
     stub_graph_fit_fn,
     stub_graph_predict_fn,
@@ -29,6 +33,7 @@ from ..models.adapters import (
 )
 from .examples import make_synthetic_relational_problem
 from .metrics import (
+    compute_macro_ris,
     compute_ris,
     compute_tracker,
     evaluate_predictions,
@@ -62,6 +67,7 @@ __all__ = [
     "ExperimentRunner",
     "ExternalGraphAdapter",
     "ExternalRelationalAdapter",
+    "GraphSAGEAdapter",
     "GraphifiedSklearnAdapter",
     "JoinedTableBuilder",
     "JoinedTableConfig",
@@ -70,14 +76,18 @@ __all__ = [
     "MeanDummyAdapter",
     "OfficialRelationalTransformerAdapter",
     "ProtocolSummary",
+    "RGCNAdapter",
+    "RelGTSubprocessAdapter",
     "RunResult",
     "SklearnTabularAdapter",
     "TableSpec",
     "TaskSpec",
     "TemporalSplit",
+    "ULTRASubprocessAdapter",
     "ViewFactory",
     "_dense_feature_matrix",
     "build_graph_degree_feature_table",
+    "compute_macro_ris",
     "compute_ris",
     "compute_tracker",
     "count_incident_tables",

@@ -6,7 +6,7 @@ This repo contains:
 
 - `src/continuumbench_experiments/continuumbench/harness.py`: thin compatibility facade over the core ContinuumBench modules.
 - `src/continuumbench_experiments/continuumbench/specs.py`: task, table, split, and experiment data contracts.
-- `src/continuumbench_experiments/continuumbench/views.py`: joined-table and graphified view construction.
+- `src/continuumbench_experiments/continuumbench/views.py`: joined-table and structural count proxy view construction.
 - `src/continuumbench_experiments/continuumbench/runner.py`: Protocol A / B execution and result summaries.
 - `src/continuumbench_experiments/continuumbench/examples.py`: synthetic demo problem.
 - `src/continuumbench_experiments/cli/continuumbench.py`: primary ContinuumBench runner for TabICL and TabPFN.
@@ -50,6 +50,9 @@ make continuumbench
 ./scripts/run_local_experiments.sh continuumbench
 ```
 
+The current graph track is a structural count-based proxy derived from relational incident counts.
+It is not yet a full graph neural pipeline with explicit nodes/edges and a GNN encoder.
+
 TabPFN-only run:
 
 ```bash
@@ -67,6 +70,12 @@ RT_REPO_PATH=/path/to/relational-transformer make continuumbench-rt
 RT_REPO_PATH=/path/to/relational-transformer \
 ./scripts/run_local_experiments.sh continuumbench-rt
 ```
+
+Each protocol run writes both per-run metrics and RIS summaries to
+`<task>__protocol_*__ris.json`, and the CLI now prints RIS directly after each protocol table.
+
+Paper wording template for this setup is included at
+`docs/paper_results_structural_proxy_template.tex`.
 
 ## Snellius
 

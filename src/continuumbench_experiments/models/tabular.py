@@ -8,10 +8,16 @@ from tabpfn.constants import ModelVersion
 from tabicl import TabICLClassifier
 from tabpfn import TabPFNClassifier, TabPFNRegressor
 
+try:
+    from xgboost import XGBClassifier, XGBRegressor
+except ImportError:  # pragma: no cover
+    XGBClassifier = None  # type: ignore[assignment,misc]
+    XGBRegressor = None  # type: ignore[assignment,misc]
+
 TABICL_CHECKPOINT_VERSION = "tabicl-classifier-v1.1-20250506.ckpt"
 TABICL_AUTO_MAX_TRAIN_ROWS = 50_000
 TABPFN_MODEL_VERSION = ModelVersion.V2
-SUPPORTED_MODEL_NAMES = frozenset({"tabicl", "tabpfn"})
+SUPPORTED_MODEL_NAMES = frozenset({"tabicl", "tabpfn", "xgboost"})
 TaskType = Literal["classification", "regression"]
 
 
@@ -81,6 +87,31 @@ def resolve_tabpfn_device(
     return device_spec.strip() if device_spec is not None else "auto"
 
 
+def build_xgboost(task_type: TaskType, seed: int = 0):
+    """Build an XGBoost estimator for the given task type.
+
+    Uses sensible defaults for tabular relational data.
+    Requires the ``xgboost`` package (``pip install xgboost``).
+    """
+    if XGBClassifier is None or XGBRegressor is None:
+        raise ImportError(
+            "xgboost is not installed. Install it with: pip install xgboost"
+        )
+    shared = {
+        "n_estimators": 500,
+        "learning_rate": 0.05,
+        "max_depth": 6,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "random_state": seed,
+        "n_jobs": -1,
+        "tree_method": "hist",
+    }
+    if task_type == "regression":
+        return XGBRegressor(**shared)
+    return XGBClassifier(**shared, eval_metric="logloss", use_label_encoder=False)
+
+
 def default_max_train_rows(model_name: str, explicit_cap: int | None = None) -> int | None:
     if explicit_cap is not None:
         return explicit_cap
@@ -97,15 +128,19 @@ def build_tabular_estimator(
     tabicl_device: str | None = None,
     tabicl_use_amp: bool = False,
     ignore_pretraining_limits: bool = False,
+    seed: int = 0,
 ):
     if model_name not in SUPPORTED_MODEL_NAMES:
         raise ValueError(
             f"Unsupported model: {model_name}. Allowed: {sorted(SUPPORTED_MODEL_NAMES)}"
         )
 
+    if model_name == "xgboost":
+        return build_xgboost(task_type, seed=seed)
+
     if task_type == "regression":
         if model_name != "tabpfn":
-            raise ValueError("Regression tasks require tabpfn.")
+            raise ValueError("Regression tasks require tabpfn or xgboost.")
         return build_tabpfn_regressor(
             device=device,
             ignore_pretraining_limits=ignore_pretraining_limits,

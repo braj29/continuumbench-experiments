@@ -196,7 +196,7 @@ class ExperimentRunner:
                 RunResult(
                     task_name=task.name,
                     model_name=model.name,
-                    view_name="graphified",
+                    view_name=model.view_name,
                     split_name="test",
                     metric_name=task.metric_name,
                     metric_value=score,
@@ -272,7 +272,7 @@ class ExperimentRunner:
                     RunResult(
                         task_name=task.name,
                         model_name=f"{model.name}:K={k_value}",
-                        view_name="graphified",
+                        view_name=model.view_name,
                         split_name="test",
                         metric_name=task.metric_name,
                         metric_value=score,
@@ -382,8 +382,8 @@ class ExperimentRunner:
                 parts.append(f"hops={run.extra['max_path_hops']}")
             if "lookback_days" in run.extra:
                 parts.append(f"window={run.extra['lookback_days']}")
-        elif run.view_name == "graphified":
-            graphified = run.extra.get("graphified")
+        elif run.view_name in {"graphified", "structural-count-proxy"}:
+            graphified = run.extra.get("graph_proxy") or run.extra.get("graphified")
             if graphified:
                 parts.append(str(graphified))
             if "K" in run.extra:

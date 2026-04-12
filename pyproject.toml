@@ -18,6 +18,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest"]
 task-source = ["relbench>=2.1.1"]
+xgboost = ["xgboost>=2.0"]
+gnn = ["torch-geometric>=2.5"]
 
 [tool.uv]
 package = false
@@ -36,3 +38,8 @@ select = ["E", "F", "I"]
 quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

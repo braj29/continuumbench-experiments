@@ -19,6 +19,12 @@ from .adapter_graph import (
     stub_graph_fit_fn,
     stub_graph_predict_fn,
 )
+from .adapter_graph_nn import (
+    GraphSAGEAdapter,
+    RGCNAdapter,
+    RelGTSubprocessAdapter,
+    ULTRASubprocessAdapter,
+)
 from .adapter_relational import (
     ExternalRelationalAdapter,
     OfficialRelationalTransformerAdapter,
@@ -39,6 +45,10 @@ __all__ = [
     "ExternalRelationalAdapter",
     "OfficialRelationalTransformerAdapter",
     "ExternalGraphAdapter",
+    "GraphSAGEAdapter",
+    "RGCNAdapter",
+    "RelGTSubprocessAdapter",
+    "ULTRASubprocessAdapter",
     "MeanDummyAdapter",
     "stub_relational_fit_fn",
     "stub_relational_predict_fn",
