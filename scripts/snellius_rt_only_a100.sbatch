@@ -454,7 +454,22 @@ if [[ "${RT_ZERO_SHOT}" == "1" ]]; then
   rt_ckpt_flags+=("--rt-zero-shot")
 fi
 
-# Execute benchmark: official RT on relational view only (Protocol A only)
+# ---------------------------------------------------------------------------
+# View scope: RT_ALL_VIEWS=1 runs the full Protocol A (JT-Entity,
+# JT-TemporalAgg, relational with RT, structural-count proxy graph track)
+# using MODELS= as the joined-table/graph model.
+# Default (RT_ALL_VIEWS=0) runs the relational view only.
+# ---------------------------------------------------------------------------
+RT_ALL_VIEWS="${RT_ALL_VIEWS:-0}"
+
+view_scope_flags=()
+if [[ "${RT_ALL_VIEWS}" == "1" ]]; then
+  echo "Full Protocol A: JT views (${MODELS}) + relational (RT) + graph track."
+else
+  view_scope_flags+=("--relational-only")
+fi
+
+# Execute benchmark
 python "${REPO_ROOT}/continuumbench_tabfm_run.py" \
   --task-source dataset \
   --dataset-name "${DATASET_NAME}" \
@@ -465,7 +480,7 @@ python "${REPO_ROOT}/continuumbench_tabfm_run.py" \
   "${download_artifacts_flag}" \
   --use-official-rt-relational \
   --rt-repo-path "${RT_REPO_PATH}" \
-  --relational-only \
+  "${view_scope_flags[@]}" \
   --no-run-protocol-b \
   --output-dir "${JOB_OUTPUT_DIR}" \
   "${rt_ckpt_flags[@]}"
