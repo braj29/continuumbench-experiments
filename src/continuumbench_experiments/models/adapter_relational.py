@@ -134,10 +134,22 @@ class OfficialRelationalTransformerAdapter(BaseViewModel):
             self.target_col,
             self.columns_to_drop,
         )
+        # Zero-shot sentinel: max_steps=0 means "evaluate the loaded checkpoint
+        # without any fine-tuning".  RT's training loop is `while steps < max_steps`,
+        # so with max_steps=0 the loop never runs and evaluate() is never called.
+        # Work-around: run exactly 1 step with eval_freq=1 so that the evaluation
+        # fires at step=0 (before the single gradient update) and prints the metric.
+        if self.max_steps == 0:
+            effective_max_steps = 1
+            effective_eval_freq = 1
+        else:
+            effective_max_steps = self.max_steps
+            effective_eval_freq = self.eval_freq
+
         return {
             "project": self.project,
             "eval_splits": self.eval_splits,
-            "eval_freq": self.eval_freq,
+            "eval_freq": effective_eval_freq,
             "eval_pow2": self.eval_pow2,
             "max_eval_steps": self.max_eval_steps,
             "load_ckpt_path": self.load_ckpt_path,
@@ -153,7 +165,7 @@ class OfficialRelationalTransformerAdapter(BaseViewModel):
             "wd": self.wd,
             "lr_schedule": self.lr_schedule,
             "max_grad_norm": self.max_grad_norm,
-            "max_steps": self.max_steps,
+            "max_steps": effective_max_steps,
             "embedding_model": self.embedding_model,
             "d_text": self.d_text,
             "seq_len": self.seq_len,
