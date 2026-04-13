@@ -37,6 +37,20 @@ RESULTS_DIR="${REPO_ROOT}/outputs/snellius/${SLURM_JOB_ID}"
 VENV_DIR="${VENV_DIR:-${REPO_ROOT}/.venv-snellius}"
 RT_PREPROCESSED_ROOT="${RT_PREPROCESSED_ROOT:-${HOME}/scratch/pre}"
 
+# Pretrained checkpoint options (both default to 0 / disabled).
+#   RT_USE_PRETRAINED=1  → download pretrain_<dataset>_<task>.pt from HF Hub
+#                          and pass it as --rt-load-ckpt-path.
+#   RT_ZERO_SHOT=1       → combine with RT_USE_PRETRAINED=1 to skip fine-tuning
+#                          entirely (zero-shot evaluation of the foundation model).
+#   RT_CKPT_PATH         → supply an explicit local checkpoint path instead of
+#                          auto-downloading (overrides RT_USE_PRETRAINED).
+RT_USE_PRETRAINED="${RT_USE_PRETRAINED:-0}"
+RT_ZERO_SHOT="${RT_ZERO_SHOT:-0}"
+RT_CKPT_PATH="${RT_CKPT_PATH:-}"
+RT_CKPT_DIR="${RT_CKPT_DIR:-${HOME}/scratch/rt_ckpts}"
+# HF repo that hosts the pretrained checkpoints.
+RT_HF_REPO="${RT_HF_REPO:-rishabh-ranjan/relational-transformer}"
+
 detect_latest_rust_module() {
   module -t avail Rust 2>&1 \
     | awk '/^Rust\/[0-9]/{print}' \
@@ -399,6 +413,47 @@ case "$(lowercase "${DOWNLOAD_ARTIFACTS}")" in
     ;;
 esac
 
+# ---------------------------------------------------------------------------
+# Pretrained checkpoint: download from HuggingFace Hub if requested.
+# ---------------------------------------------------------------------------
+rt_ckpt_flags=()
+
+if [[ -n "${RT_CKPT_PATH}" ]]; then
+  # Caller supplied an explicit checkpoint path — use it directly.
+  echo "Using explicit checkpoint: ${RT_CKPT_PATH}"
+  rt_ckpt_flags+=("--rt-load-ckpt-path" "${RT_CKPT_PATH}")
+elif [[ "${RT_USE_PRETRAINED}" == "1" ]]; then
+  # Auto-download: pretrain_<dataset>_<task>.pt (trained with this task held out).
+  RT_CKPT_NAME="pretrain_${DATASET_NAME}_${TASK_NAME}.pt"
+  RT_CKPT_PATH="${RT_CKPT_DIR}/${RT_CKPT_NAME}"
+  mkdir -p "${RT_CKPT_DIR}"
+  if [[ ! -f "${RT_CKPT_PATH}" ]]; then
+    echo "Downloading pretrained RT checkpoint ${RT_CKPT_NAME} from HF Hub..."
+    python - <<PY
+from huggingface_hub import hf_hub_download
+import shutil, os
+path = hf_hub_download(
+    repo_id="${RT_HF_REPO}",
+    filename="${RT_CKPT_NAME}",
+    local_dir="${RT_CKPT_DIR}",
+)
+print(f"Downloaded: {path}")
+PY
+  else
+    echo "Pretrained checkpoint already cached: ${RT_CKPT_PATH}"
+  fi
+  rt_ckpt_flags+=("--rt-load-ckpt-path" "${RT_CKPT_PATH}")
+fi
+
+if [[ "${RT_ZERO_SHOT}" == "1" ]]; then
+  if [[ ${#rt_ckpt_flags[@]} -eq 0 ]]; then
+    echo "ERROR: RT_ZERO_SHOT=1 requires RT_USE_PRETRAINED=1 or RT_CKPT_PATH." >&2
+    exit 1
+  fi
+  echo "Zero-shot mode: skipping fine-tuning (max_steps=0)."
+  rt_ckpt_flags+=("--rt-zero-shot")
+fi
+
 # Execute benchmark: official RT on relational view only (Protocol A only)
 python "${REPO_ROOT}/continuumbench_tabfm_run.py" \
   --task-source dataset \
@@ -412,7 +467,8 @@ python "${REPO_ROOT}/continuumbench_tabfm_run.py" \
   --rt-repo-path "${RT_REPO_PATH}" \
   --relational-only \
   --no-run-protocol-b \
-  --output-dir "${JOB_OUTPUT_DIR}"
+  --output-dir "${JOB_OUTPUT_DIR}" \
+  "${rt_ckpt_flags[@]}"
 
 # Copy output directory from scratch back to the repo
 cp -r "${JOB_OUTPUT_DIR}/." "${RESULTS_DIR}/"

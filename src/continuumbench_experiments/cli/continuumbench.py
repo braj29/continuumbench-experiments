@@ -279,6 +279,27 @@ def _add_relational_transformer_args(parser: argparse.ArgumentParser) -> None:
             "(defaults to the current interpreter)."
         ),
     )
+    parser.add_argument(
+        "--rt-load-ckpt-path",
+        type=str,
+        default=None,
+        help=(
+            "Path to a pretrained RT checkpoint (.pt file). "
+            "Pass the checkpoint downloaded from "
+            "rishabh-ranjan/relational-transformer on HuggingFace Hub, e.g. "
+            "pretrain_rel-f1_driver-top3.pt. "
+            "Combine with --rt-zero-shot to skip fine-tuning entirely."
+        ),
+    )
+    parser.add_argument(
+        "--rt-zero-shot",
+        action="store_true",
+        help=(
+            "Set max_steps=0 so RT only evaluates the loaded checkpoint "
+            "without any task-specific fine-tuning. "
+            "Requires --rt-load-ckpt-path."
+        ),
+    )
 
 
 def _resolved_rt_repo_path(args: argparse.Namespace) -> str | None:
@@ -510,18 +531,38 @@ def _build_relational_models(args: argparse.Namespace, task: TaskSpec) -> list[B
             f"{task.target_col!r}."
         )
 
+    load_ckpt_path = getattr(args, "rt_load_ckpt_path", None)
+    zero_shot = bool(getattr(args, "rt_zero_shot", False))
+
+    if zero_shot and not load_ckpt_path:
+        raise ValueError(
+            "--rt-zero-shot requires --rt-load-ckpt-path "
+            "(no checkpoint to evaluate without fine-tuning)."
+        )
+
+    if zero_shot:
+        adapter_name = "rt-pretrained-zeroshot"
+        effective_max_steps = 0
+    elif load_ckpt_path:
+        adapter_name = "rt-pretrained-finetuned"
+        effective_max_steps = args.rt_max_steps
+    else:
+        adapter_name = "rt-official"
+        effective_max_steps = args.rt_max_steps
+
     return [
         OfficialRelationalTransformerAdapter(
-            name="rt-official",
+            name=adapter_name,
             dataset_name=dataset_name,
             task_name=task_name,
             target_col=target_col,
             rt_repo_path=rt_path,
             python_executable=args.rt_python_executable,
             seed=args.seed,
-            max_steps=args.rt_max_steps,
+            max_steps=effective_max_steps,
             batch_size=args.rt_batch_size,
             num_workers=args.rt_num_workers,
+            load_ckpt_path=load_ckpt_path,
         )
     ]
 
