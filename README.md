@@ -85,6 +85,56 @@ The simplest Snellius workflow is:
 - `scripts/snellius_tabpfn_a100.sbatch`: final self-contained batch script for one A100 GPU job.
 - `scripts/submit_snellius_tabular.sh`: one-command submit/watch wrapper for tabular runs (TabICL/TabPFN/XGBoost) with reliable `MODELS` export.
 - `scripts/submit_snellius_rt_only.sh`: one-command submit/watch wrapper for official RT-only runs (auto-checks RT preprocessed files, auto-detects Rust module, uses `sbatch --parsable`).
+- `scripts/stage_homecredit_csvs.sh`: validate/copy the 7 HomeCredit Kaggle CSVs into a target directory before HomeCredit submissions.
+- `scripts/run_local_homecredit_tabpfn.sh`: one-command local HomeCredit + TabPFN run (auto-detects `~/Downloads` CSV folder or accepts explicit source path).
+- `scripts/run_tabred_homecredit_tabpfn.sh`: run TabPFN on a TabReD-formatted `homecredit-default` dataset directory.
+- `scripts/submit_snellius_tabred_homecredit_tabpfn.sh`: submit/watch TabReD HomeCredit + TabPFN on Snellius.
+
+### TabReD HomeCredit + TabPFN
+
+If you already have TabReD's preprocessed HomeCredit task at
+`<tabred_root>/data/homecredit-default` (from
+`yandex-research/tabred/preprocessing/homecredit.py`), run:
+
+```bash
+TABRED_DATA_DIR=/path/to/tabred/data/homecredit-default \
+./scripts/run_tabred_homecredit_tabpfn.sh
+```
+
+Or via the local task wrapper:
+
+```bash
+TABRED_DATA_DIR=/path/to/tabred/data/homecredit-default \
+make tabred-homecredit-tabpfn
+```
+
+For a data-load/split validation pass without fitting:
+
+```bash
+TABRED_DATA_DIR=/path/to/tabred/data/homecredit-default DRY_RUN=1 \
+make tabred-homecredit-tabpfn
+```
+
+This writes metrics JSON to:
+
+```text
+outputs/tabred_homecredit_tabpfn/result.json
+```
+
+To inspect available split names before fitting:
+
+```bash
+python -m continuumbench_experiments.tabred_homecredit_tabpfn \
+  --tabred-data-dir /path/to/tabred/data/homecredit-default \
+  --list-splits
+```
+
+Snellius submit for this TabReD task:
+
+```bash
+TABRED_DATA_DIR=/scratch-shared/$USER/tabred/data/homecredit-default \
+./scripts/submit_snellius_tabred_homecredit_tabpfn.sh
+```
 
 Suggested flow on a Snellius login node:
 
@@ -135,5 +185,6 @@ uv run python -m unittest -q \
   tests.test_models_device_resolution \
   tests.test_models_tabular \
   tests.test_continuumbench_harness \
-  tests.test_continuumbench_cli
+  tests.test_continuumbench_cli \
+  tests.test_tabred_homecredit_tabpfn
 ```

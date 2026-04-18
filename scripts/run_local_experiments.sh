@@ -17,6 +17,11 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-outputs/local_runs}"
 RT_REPO_PATH="${RT_REPO_PATH:-$REPO_ROOT/relational-transformer}"
 DOWNLOAD_ARTIFACTS="${DOWNLOAD_ARTIFACTS:-true}"
 TABPFN_IGNORE_PRETRAINING_LIMITS="${TABPFN_IGNORE_PRETRAINING_LIMITS:-true}"
+TABRED_DATA_DIR="${TABRED_DATA_DIR:-$REPO_ROOT/data/tabred/homecredit-default}"
+SPLIT="${SPLIT:-default}"
+INCLUDE_META="${INCLUDE_META:-0}"
+MAX_TRAIN_ROWS="${MAX_TRAIN_ROWS:-}"
+DRY_RUN="${DRY_RUN:-0}"
 
 lowercase() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
@@ -46,6 +51,7 @@ Targets:
   continuumbench-smoke  Synthetic ContinuumBench smoke run (TabICL + TabPFN).
   continuumbench        Dataset-backed ContinuumBench run (TabICL + TabPFN).
   continuumbench-rt     ContinuumBench run with official relational-transformer.
+  tabred-homecredit-tabpfn  TabReD HomeCredit task with TabPFN only.
   test                  Run the focused unit test suite.
 
 Environment overrides:
@@ -58,6 +64,11 @@ Environment overrides:
   RT_REPO_PATH       default: ${RT_REPO_PATH}
   DOWNLOAD_ARTIFACTS default: ${DOWNLOAD_ARTIFACTS}
   TABPFN_IGNORE_PRETRAINING_LIMITS default: ${TABPFN_IGNORE_PRETRAINING_LIMITS}
+  TABRED_DATA_DIR    default: ${TABRED_DATA_DIR}
+  SPLIT              default: ${SPLIT}
+  INCLUDE_META       default: ${INCLUDE_META}
+  MAX_TRAIN_ROWS     default: ${MAX_TRAIN_ROWS:-<unset>}
+  DRY_RUN            default: ${DRY_RUN}
 EOF
 }
 
@@ -101,7 +112,8 @@ case "${target}" in
       tests.test_models_device_resolution \
       tests.test_models_tabular \
       tests.test_continuumbench_harness \
-      tests.test_continuumbench_cli
+      tests.test_continuumbench_cli \
+      tests.test_tabred_homecredit_tabpfn
     ;;
 
   continuumbench-smoke)
@@ -141,6 +153,20 @@ case "${target}" in
       --use-official-rt-relational \
       --rt-repo-path "${RT_REPO_PATH}" \
       --output-dir "${OUTPUT_ROOT}/continuumbench_rt"
+    ;;
+
+  tabred-homecredit-tabpfn)
+    run env \
+      TABRED_DATA_DIR="${TABRED_DATA_DIR}" \
+      SPLIT="${SPLIT}" \
+      DEVICE="${DEVICE}" \
+      SEED="${SEED}" \
+      INCLUDE_META="${INCLUDE_META}" \
+      TABPFN_IGNORE_PRETRAINING_LIMITS="${TABPFN_IGNORE_PRETRAINING_LIMITS}" \
+      MAX_TRAIN_ROWS="${MAX_TRAIN_ROWS}" \
+      DRY_RUN="${DRY_RUN}" \
+      OUTPUT_JSON="${OUTPUT_ROOT}/tabred_homecredit_tabpfn/result.json" \
+      "${REPO_ROOT}/scripts/run_tabred_homecredit_tabpfn.sh"
     ;;
 
   *)
