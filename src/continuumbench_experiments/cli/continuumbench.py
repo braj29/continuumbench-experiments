@@ -14,6 +14,7 @@ from typing import Callable, Sequence
 from ..continuumbench.examples import make_synthetic_relational_problem
 from ..continuumbench.runner import ExperimentRunner
 from ..continuumbench.sources import load_dataset_entity_problem
+from ..continuumbench.sources_homecredit import load_homecredit_default
 from ..continuumbench.specs import (
     DatabaseSpec,
     ExperimentConfig,
@@ -86,9 +87,26 @@ def _add_problem_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--task-source",
         type=str,
-        choices=["dataset", "synthetic"],
+        choices=["dataset", "synthetic", "homecredit"],
         default="dataset",
-        help="dataset: load a registered entity task. synthetic: toy schema only.",
+        help=(
+            "dataset: load a registered RelBench entity task. "
+            "synthetic: toy schema only. "
+            "homecredit: Home Credit Default Risk from raw Kaggle CSVs "
+            "(requires --homecredit-data-dir)."
+        ),
+    )
+    parser.add_argument(
+        "--homecredit-data-dir",
+        type=str,
+        default=None,
+        help=(
+            "Path to the directory containing the seven Home Credit Kaggle CSVs "
+            "(application_train.csv, bureau.csv, bureau_balance.csv, "
+            "previous_application.csv, POS_CASH_balance.csv, "
+            "credit_card_balance.csv, installments_payments.csv). "
+            "Required when --task-source=homecredit."
+        ),
     )
     parser.add_argument(
         "--dataset-name",
@@ -163,7 +181,20 @@ def _add_model_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help=(
             "Run only the relational view in Protocol A (skip joined-table and graph tracks). "
-            "Protocol B is skipped in this mode."
+            "Protocol B is skipped in this mode.  Deprecated: use --track relational instead."
+        ),
+    )
+    parser.add_argument(
+        "--track",
+        type=str,
+        default="all",
+        choices=["all", "joined", "graph", "relational"],
+        help=(
+            "Which view track(s) to run in Protocol A.  "
+            "'all': joined-table + graph + relational (default).  "
+            "'joined': joined-table views only (JT-Entity + JT-TemporalAgg).  "
+            "'graph': graph view only (degree-proxy / RGCN / GraphSAGE / RelGT).  "
+            "'relational': relational view only — equivalent to --relational-only."
         ),
     )
 
@@ -488,6 +519,13 @@ def _load_problem(args: argparse.Namespace) -> LoadedProblem:
             args.task_name,
             download=args.download_artifacts,
         )
+    elif args.task_source == "homecredit":
+        if not args.homecredit_data_dir:
+            raise ValueError(
+                "--homecredit-data-dir is required when --task-source=homecredit. "
+                "Pass the path to the directory containing the Kaggle CSVs."
+            )
+        db, task, split = load_homecredit_default(args.homecredit_data_dir)
     else:
         db, task, split = make_synthetic_relational_problem()
     return LoadedProblem(db=db, task=task, split=split)
@@ -503,10 +541,10 @@ def _build_relational_models(args: argparse.Namespace, task: TaskSpec) -> list[B
             )
         ]
 
-    if args.task_source != "dataset":
+    if args.task_source == "synthetic":
         raise ValueError(
-            "Official Relational Transformer expects the dataset-backed task source. "
-            "Use --task-source dataset (not synthetic) so metrics are comparable."
+            "Official Relational Transformer does not support --task-source synthetic. "
+            "Use --task-source dataset or --task-source homecredit."
         )
 
     rt_path = _resolved_rt_repo_path(args)
@@ -516,15 +554,24 @@ def _build_relational_models(args: argparse.Namespace, task: TaskSpec) -> list[B
             "Clone it to ./relational-transformer or pass --rt-repo-path."
         )
 
-    dataset_name = args.rt_dataset_name or args.dataset_name
-    task_name = args.rt_task_name or args.task_name
+    # For homecredit source the dataset/task are fixed; for dataset source they come from args.
+    if args.task_source == "homecredit":
+        default_dataset_name = "homecredit-default"
+        default_task_name = "loan-default"
+    else:
+        default_dataset_name = args.dataset_name
+        default_task_name = args.task_name
+
+    dataset_name = args.rt_dataset_name or default_dataset_name
+    task_name = args.rt_task_name or default_task_name
     target_col = args.rt_target_col or task.target_col
 
-    if dataset_name != args.dataset_name or task_name != args.task_name:
-        raise ValueError(
-            "RT dataset/task overrides must match --dataset-name/--task-name "
-            "when benchmarking a single registered task."
-        )
+    if args.task_source == "dataset":
+        if dataset_name != args.dataset_name or task_name != args.task_name:
+            raise ValueError(
+                "RT dataset/task overrides must match --dataset-name/--task-name "
+                "when benchmarking a single registered task."
+            )
     if target_col != task.target_col:
         raise ValueError(
             f"RT target {target_col!r} must match loaded task target "
@@ -613,7 +660,7 @@ def _emit_runtime_warnings(models: Sequence[str], args: argparse.Namespace) -> N
             file=sys.stderr,
             flush=True,
         )
-    if args.task_source == "dataset" and not args.use_official_rt_relational:
+    if not args.use_official_rt_relational:
         print(
             "continuumbench: relational track is using rt-stub, not the official "
             "Relational Transformer. Pass --use-official-rt-relational to benchmark RT.",
@@ -669,13 +716,20 @@ def _protocol_artifacts(task_name: str, protocol_name: str) -> dict[str, str]:
 
 
 def _task_source_metadata(args: argparse.Namespace) -> dict[str, object]:
-    if args.task_source != "dataset":
-        return {"task_source": args.task_source, "dataset_name": None, "task_name": None}
-    return {
-        "task_source": args.task_source,
-        "dataset_name": args.dataset_name,
-        "task_name": args.task_name,
-    }
+    if args.task_source == "dataset":
+        return {
+            "task_source": args.task_source,
+            "dataset_name": args.dataset_name,
+            "task_name": args.task_name,
+        }
+    if args.task_source == "homecredit":
+        return {
+            "task_source": args.task_source,
+            "dataset_name": "homecredit-default",
+            "task_name": "loan-default",
+            "homecredit_data_dir": args.homecredit_data_dir,
+        }
+    return {"task_source": args.task_source, "dataset_name": None, "task_name": None}
 
 
 def _announce_protocol(model_name: str, protocol_name: str) -> None:
@@ -716,6 +770,13 @@ def _print_protocol_ris(summary, protocol_name: str) -> None:
             )
 
 
+def _resolve_track(args: argparse.Namespace) -> str:
+    """Map legacy --relational-only to the unified --track value."""
+    if bool(getattr(args, "relational_only", False)):
+        return "relational"
+    return str(getattr(args, "track", "all"))
+
+
 def _run_model(
     model_name: str,
     args: argparse.Namespace,
@@ -727,12 +788,17 @@ def _run_model(
     model_out.mkdir(parents=True, exist_ok=True)
 
     runner = _make_runner(model_out, args.seed)
-    relational_only = bool(getattr(args, "relational_only", False))
+    track = _resolve_track(args)
 
-    joined_models = [] if relational_only else [_build_joined_model(model_name, args, problem.task)]
-    relational_models = _build_relational_models(args, problem.task)
-    graph_models = [] if relational_only else [_build_graph_model(model_name, args, problem.task)]
+    run_joined = track in ("all", "joined")
+    run_graph = track in ("all", "graph")
+    run_relational = track in ("all", "relational")
 
+    joined_models = [_build_joined_model(model_name, args, problem.task)] if run_joined else []
+    relational_models = _build_relational_models(args, problem.task) if run_relational else []
+    graph_models = [_build_graph_model(model_name, args, problem.task)] if run_graph else []
+
+    relational_only = (track == "relational")
     protocol_model_name = (
         relational_models[0].name
         if relational_only and relational_models
@@ -774,10 +840,10 @@ def _run_model(
         _print_protocol_summary(summary_b)
         _print_protocol_ris(summary_b, "Protocol B")
         manifest["protocol_b"] = _protocol_artifacts(problem.task.name, "protocol_b")
-    elif args.run_protocol_b and relational_only:
+    elif args.run_protocol_b and (track != "all"):
         print(
-            "continuumbench: skipping Protocol B in --relational-only mode "
-            "(Protocol B only ablates joined-table and graph tracks).",
+            f"continuumbench: skipping Protocol B for --track {track} "
+            "(Protocol B ablates joined-table and graph tracks; only meaningful with --track all).",
             file=sys.stderr,
             flush=True,
         )
@@ -794,9 +860,10 @@ def _write_manifest(out_root: Path, manifest: dict[str, dict[str, object]]) -> N
 
 def run(args: argparse.Namespace) -> None:
     models = _parse_models(args.models)
-    if args.relational_only and not args.use_official_rt_relational:
+    track = _resolve_track(args)
+    if track == "relational" and not args.use_official_rt_relational:
         raise ValueError(
-            "--relational-only requires --use-official-rt-relational. "
+            "--track relational (or --relational-only) requires --use-official-rt-relational. "
             "This mode is intended for official RT-only benchmarking."
         )
     _emit_runtime_warnings(models, args)
@@ -808,7 +875,7 @@ def run(args: argparse.Namespace) -> None:
     out_root.mkdir(parents=True, exist_ok=True)
     protocol_configs = _default_protocol_configs()
 
-    if args.relational_only:
+    if track == "relational":
         selected_model = models[0]
         if len(models) > 1:
             print(
