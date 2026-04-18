@@ -9,7 +9,7 @@ MODELS="${MODELS:-tabpfn}"
 TASK_SOURCE="${TASK_SOURCE:-dataset}"
 DATASET_NAME="${DATASET_NAME:-rel-f1}"
 TASK_NAME="${TASK_NAME:-driver-top3}"
-HC_DATA_DIR="${HC_DATA_DIR:-/scratch-shared/$USER/homecredit}"
+HC_DATA_DIR="${HC_DATA_DIR:-}"
 SEED="${SEED:-7}"
 DEVICE="${DEVICE:-cuda}"
 DOWNLOAD_ARTIFACTS="${DOWNLOAD_ARTIFACTS:-0}"
@@ -37,6 +37,7 @@ if [[ ! -f "${VENV_DIR}/bin/activate" ]]; then
   exit 1
 fi
 
+TASK_SOURCE="$(printf '%s' "${TASK_SOURCE}" | tr '[:upper:]' '[:lower:]')"
 case "${TASK_SOURCE}" in
   dataset|homecredit|synthetic)
     ;;
@@ -46,9 +47,14 @@ case "${TASK_SOURCE}" in
     ;;
 esac
 
-if [[ "${TASK_SOURCE}" == "homecredit" && ! -d "${HC_DATA_DIR}" ]]; then
-  echo "HC_DATA_DIR not found: ${HC_DATA_DIR}" >&2
-  exit 1
+if [[ "${TASK_SOURCE}" == "homecredit" ]]; then
+  if [[ -z "${HC_DATA_DIR}" ]]; then
+    echo "WARN: TASK_SOURCE=homecredit but HC_DATA_DIR is not set; falling back to TASK_SOURCE=dataset."
+    TASK_SOURCE="dataset"
+  elif [[ ! -d "${HC_DATA_DIR}" ]]; then
+    echo "HC_DATA_DIR not found: ${HC_DATA_DIR}" >&2
+    exit 1
+  fi
 fi
 
 export MODELS

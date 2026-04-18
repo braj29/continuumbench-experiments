@@ -17,7 +17,7 @@ set -euo pipefail
 TASK_SOURCE="${TASK_SOURCE:-dataset}"
 DATASET_NAME="${DATASET_NAME:-rel-f1}"
 TASK_NAME="${TASK_NAME:-driver-top3}"
-HC_DATA_DIR="${HC_DATA_DIR:-/scratch-shared/$USER/homecredit}"
+HC_DATA_DIR="${HC_DATA_DIR:-}"
 MODELS="${MODELS:-tabpfn}"
 SEED="${SEED:-7}"
 DEVICE="${DEVICE:-cuda}"
@@ -162,7 +162,14 @@ validate_models_spec "${MODELS}"
 validate_task_source
 TASK_SOURCE="$(lowercase "${TASK_SOURCE}")"
 if [[ "${TASK_SOURCE}" == "homecredit" ]]; then
-  validate_homecredit_data_dir
+  # With --export=ALL, stale TASK_SOURCE from a previous shell can leak in.
+  # Only activate HomeCredit mode when HC_DATA_DIR is explicitly provided.
+  if [[ -z "${HC_DATA_DIR}" ]]; then
+    echo "WARN: TASK_SOURCE=homecredit but HC_DATA_DIR is not set; falling back to TASK_SOURCE=dataset."
+    TASK_SOURCE="dataset"
+  else
+    validate_homecredit_data_dir
+  fi
 fi
 
 echo "=== ContinuumBench tabular run ==="
