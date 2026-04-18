@@ -6,8 +6,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${REPO_ROOT}"
 
 MODELS="${MODELS:-tabpfn}"
+TASK_SOURCE="${TASK_SOURCE:-dataset}"
 DATASET_NAME="${DATASET_NAME:-rel-f1}"
 TASK_NAME="${TASK_NAME:-driver-top3}"
+HC_DATA_DIR="${HC_DATA_DIR:-/scratch-shared/$USER/homecredit}"
 SEED="${SEED:-7}"
 DEVICE="${DEVICE:-cuda}"
 DOWNLOAD_ARTIFACTS="${DOWNLOAD_ARTIFACTS:-0}"
@@ -35,9 +37,25 @@ if [[ ! -f "${VENV_DIR}/bin/activate" ]]; then
   exit 1
 fi
 
+case "${TASK_SOURCE}" in
+  dataset|homecredit|synthetic)
+    ;;
+  *)
+    echo "TASK_SOURCE must be one of: dataset, homecredit, synthetic" >&2
+    exit 1
+    ;;
+esac
+
+if [[ "${TASK_SOURCE}" == "homecredit" && ! -d "${HC_DATA_DIR}" ]]; then
+  echo "HC_DATA_DIR not found: ${HC_DATA_DIR}" >&2
+  exit 1
+fi
+
 export MODELS
+export TASK_SOURCE
 export DATASET_NAME
 export TASK_NAME
+export HC_DATA_DIR
 export SEED
 export DEVICE
 export DOWNLOAD_ARTIFACTS
@@ -56,7 +74,13 @@ LOG_LEGACY="${REPO_ROOT}/slurm-cb-tabpfn-${JOBID}.out"
 LOG_FALLBACK="${REPO_ROOT}/slurm-${JOBID}.out"
 
 echo "Submitted job ${JOBID}"
+echo "Task source: ${TASK_SOURCE}"
 echo "Models: ${MODELS}"
+if [[ "${TASK_SOURCE}" == "dataset" ]]; then
+  echo "Dataset/task: ${DATASET_NAME}/${TASK_NAME}"
+elif [[ "${TASK_SOURCE}" == "homecredit" ]]; then
+  echo "HomeCredit CSV dir: ${HC_DATA_DIR}"
+fi
 echo "Primary log: ${LOG_PRIMARY}"
 
 if [[ "${WATCH_LOG}" != "1" ]]; then

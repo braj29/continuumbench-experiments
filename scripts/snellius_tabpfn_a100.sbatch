@@ -14,8 +14,10 @@
 set -euo pipefail
 
 # Job configuration
+TASK_SOURCE="${TASK_SOURCE:-dataset}"
 DATASET_NAME="${DATASET_NAME:-rel-f1}"
 TASK_NAME="${TASK_NAME:-driver-top3}"
+HC_DATA_DIR="${HC_DATA_DIR:-/scratch-shared/$USER/homecredit}"
 MODELS="${MODELS:-tabpfn}"
 SEED="${SEED:-7}"
 DEVICE="${DEVICE:-cuda}"
@@ -92,6 +94,41 @@ validate_models_spec() {
   return 0
 }
 
+validate_task_source() {
+  case "$(lowercase "${TASK_SOURCE}")" in
+    dataset|homecredit|synthetic)
+      ;;
+    *)
+      echo "TASK_SOURCE must be one of: dataset, homecredit, synthetic." >&2
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+validate_homecredit_data_dir() {
+  if [[ ! -d "${HC_DATA_DIR}" ]]; then
+    echo "HC_DATA_DIR does not exist: ${HC_DATA_DIR}" >&2
+    return 1
+  fi
+
+  local csv_file
+  for csv_file in \
+    application_train.csv \
+    bureau.csv \
+    bureau_balance.csv \
+    previous_application.csv \
+    POS_CASH_balance.csv \
+    credit_card_balance.csv \
+    installments_payments.csv; do
+    if [[ ! -f "${HC_DATA_DIR}/${csv_file}" ]]; then
+      echo "Missing HomeCredit CSV: ${HC_DATA_DIR}/${csv_file}" >&2
+      return 1
+    fi
+  done
+  return 0
+}
+
 # Create output directory on scratch
 mkdir -p "${JOB_OUTPUT_DIR}" "${RESULTS_DIR}"
 
@@ -122,20 +159,42 @@ case "$(lowercase "${TABPFN_IGNORE_PRETRAINING_LIMITS}")" in
 esac
 
 validate_models_spec "${MODELS}"
+validate_task_source
+TASK_SOURCE="$(lowercase "${TASK_SOURCE}")"
+if [[ "${TASK_SOURCE}" == "homecredit" ]]; then
+  validate_homecredit_data_dir
+fi
+
 echo "=== ContinuumBench tabular run ==="
-echo "job_id=${SLURM_JOB_ID:-unknown} dataset=${DATASET_NAME} task=${TASK_NAME} models=${MODELS} seed=${SEED} device=${DEVICE}"
+echo "job_id=${SLURM_JOB_ID:-unknown} task_source=${TASK_SOURCE} dataset=${DATASET_NAME} task=${TASK_NAME} models=${MODELS} seed=${SEED} device=${DEVICE}"
+if [[ "${TASK_SOURCE}" == "homecredit" ]]; then
+  echo "homecredit_data_dir=${HC_DATA_DIR}"
+fi
 
 # Execute the benchmark from the repo and write outputs to scratch
-python "${REPO_ROOT}/continuumbench_tabfm_run.py" \
-  --task-source dataset \
-  --dataset-name "${DATASET_NAME}" \
-  --task-name "${TASK_NAME}" \
-  --models "${MODELS}" \
-  --seed "${SEED}" \
-  --device "${DEVICE}" \
-  "${download_artifacts_flag}" \
-  ${tabpfn_limits_flag} \
+cmd=(
+  python "${REPO_ROOT}/continuumbench_tabfm_run.py"
+  --task-source "${TASK_SOURCE}"
+  --models "${MODELS}"
+  --seed "${SEED}"
+  --device "${DEVICE}"
   --output-dir "${JOB_OUTPUT_DIR}"
+)
+if [[ "${TASK_SOURCE}" == "dataset" ]]; then
+  cmd+=(
+    --dataset-name "${DATASET_NAME}"
+    --task-name "${TASK_NAME}"
+    "${download_artifacts_flag}"
+  )
+elif [[ "${TASK_SOURCE}" == "homecredit" ]]; then
+  cmd+=(--homecredit-data-dir "${HC_DATA_DIR}")
+fi
+if [[ -n "${tabpfn_limits_flag}" ]]; then
+  cmd+=("${tabpfn_limits_flag}")
+fi
+
+echo "+ ${cmd[*]}"
+"${cmd[@]}"
 
 # Copy output directory from scratch back to the repo
 cp -r "${JOB_OUTPUT_DIR}/." "${RESULTS_DIR}/"
